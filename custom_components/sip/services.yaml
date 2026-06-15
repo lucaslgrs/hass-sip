@@ -1,0 +1,106 @@
+dial:
+  name: Dial
+  description: Initiate a SIP call.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    number:
+      name: Number
+      description: SIP target number/URI to dial (e.g. 100 or sip:100@freepbx).
+      required: true
+      example: "100"
+      selector:
+        text:
+    menu:
+      name: IVR Menu
+      description: Optional menu configuration for the call.
+      required: false
+      selector:
+        object:
+    ring_timeout:
+      name: Ring Timeout
+      description: Timeout in seconds for the call to ring before canceling.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 300
+          step: 1
+          unit_of_measurement: seconds
+
+hangup:
+  name: Hang up
+  description: End the active SIP call.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    sip_code:
+      name: SIP Status Code
+      description: Optional status code to send if hanging up a ringing call.
+      required: false
+      example: 486
+      selector:
+        number:
+          min: 100
+          max: 699
+          step: 1
+
+answer:
+  name: Answer
+  description: Answer an incoming SIP call.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    menu:
+      name: IVR Menu
+      description: Optional menu configuration to start on answer.
+      required: false
+      selector:
+        object:
+
+send_dtmf:
+  name: Send DTMF
+  description: Send DTMF digits to the active SIP call.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    digits:
+      name: Digits
+      description: DTMF digits to send (e.g. 123#).
+      required: true
+      example: "123#"
+      selector:
+        text:
+
+start_recording:
+  name: Start Recording
+  description: Start recording call audio to a local WAV file.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    recording_file:
+      name: Recording File Path
+      description: Absolute path of the WAV file to save (e.g. /media/recording.wav).
+      required: true
+      example: "/media/recording.wav"
+      selector:
+        text:
+
+stop_recording:
+  name: Stop Recording
+  description: Stop active call recording.
+  target:
+    entity:
+      domain: media_player
+
+start_assist:
+  name: Start Assist
+  description: Connect the active call to Home Assistant's Voice Assist.
+  target:
+    entity:
+      domain: media_player

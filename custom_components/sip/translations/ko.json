@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SIP 클라이언트 설정",
+        "description": "SIP 내선 정보 및 서버 설정을 입력해 주세요.",
+        "data": {
+          "server": "SIP 서버 주소 / 호스트",
+          "port": "포트",
+          "username": "사용자명 / 내선번호",
+          "password": "비밀번호",
+          "domain": "도메인 (선택사항)",
+          "caller_id": "발신자 ID (선택사항)",
+          "register_expiration": "등록 유효 기간 (초 단위)",
+          "local_rtp_port": "로컬 RTP 포트 (선택사항)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "SIP 서버에 연결하지 못했습니다. 주소와 포트를 다시 확인해 주세요.",
+      "invalid_auth": "사용자명 또는 비밀번호가 잘못되었습니다. 인증 정보를 다시 확인해 주세요."
+    },
+    "abort": {
+      "already_configured": "해당 사용자명과 서버 설정은 이미 등록되어 있습니다."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "registration_status": {
+        "name": "등록 상태"
+      },
+      "last_call": {
+        "name": "최근 통화"
+      }
+    },
+    "binary_sensor": {
+      "call_active": {
+        "name": "통화 활성화"
+      }
+    },
+    "switch": {
+      "dnd": {
+        "name": "방해 금지"
+      }
+    },
+    "media_player": {
+      "phone_line": {
+        "name": "전화선"
+      }
+    }
+  }
+}

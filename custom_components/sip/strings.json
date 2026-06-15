@@ -1,0 +1,52 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure SIP Client",
+        "description": "Please enter your SIP extension credentials and server details.",
+        "data": {
+          "server": "SIP Server / Host",
+          "port": "Port",
+          "username": "Username / Extension",
+          "password": "Password",
+          "domain": "Domain (Optional)",
+          "caller_id": "Caller ID (Optional)",
+          "register_expiration": "Register Expiration (seconds)",
+          "local_rtp_port": "Local RTP Port (Optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the SIP server. Please check the host and port.",
+      "invalid_auth": "Invalid username or password. Please verify your credentials."
+    },
+    "abort": {
+      "already_configured": "This username and server combination is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "registration_status": {
+        "name": "Registration Status"
+      },
+      "last_call": {
+        "name": "Last Call"
+      }
+    },
+    "binary_sensor": {
+      "call_active": {
+        "name": "Call Active"
+      }
+    },
+    "switch": {
+      "dnd": {
+        "name": "Do Not Disturb"
+      }
+    },
+    "media_player": {
+      "phone_line": {
+        "name": "Phone Line"
+      }
+    }
+  }
+}

@@ -9,8 +9,10 @@
           "port": "포트",
           "username": "사용자명 / 내선번호",
           "password": "비밀번호",
+          "authentication_username": "인증 사용자명 (선택사항)",
           "domain": "도메인 (선택사항)",
           "caller_id": "발신자 ID (선택사항)",
+          "outbound_proxy": "아웃바운드 프록시 (선택사항)",
           "register_expiration": "등록 유효 기간 (초 단위)",
           "local_rtp_port": "로컬 RTP 포트 (선택사항)"
         }

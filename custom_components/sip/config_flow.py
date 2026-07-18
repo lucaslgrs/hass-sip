@@ -21,6 +21,8 @@ from .const import (
     CONF_CALLER_ID,
     CONF_REGISTER_EXPIRATION,
     CONF_LOCAL_RTP_PORT,
+    CONF_OUTBOUND_PROXY,
+    CONF_AUTH_USERNAME,
     DEFAULT_PORT,
     DEFAULT_REGISTER_EXPIRATION,
     DEFAULT_LOCAL_RTP_PORT,
@@ -34,8 +36,10 @@ def _build_schema(rtp_port_default: int) -> vol.Schema:
             vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
             vol.Required(CONF_USERNAME): cv.string,
             vol.Required(CONF_PASSWORD): cv.string,
+            vol.Optional(CONF_AUTH_USERNAME): cv.string,
             vol.Optional(CONF_DOMAIN): cv.string,
             vol.Optional(CONF_CALLER_ID): cv.string,
+            vol.Optional(CONF_OUTBOUND_PROXY): cv.string,
             vol.Optional(
                 CONF_REGISTER_EXPIRATION, default=DEFAULT_REGISTER_EXPIRATION
             ): cv.positive_int,
@@ -67,8 +71,10 @@ async def async_validate_sip_registration(
         port=user_input.get(CONF_PORT, 5060),
         username=user_input[CONF_USERNAME],
         password=user_input[CONF_PASSWORD],
+        auth_username=user_input.get(CONF_AUTH_USERNAME, ""),
         domain=user_input.get(CONF_DOMAIN, ""),
         caller_id=user_input.get(CONF_CALLER_ID, ""),
+        outbound_proxy=user_input.get(CONF_OUTBOUND_PROXY, ""),
         # Use the configured expiration — a hardcoded short value (e.g. 10s)
         # triggers SIP 423 Interval Too Brief on registrars with Min-Expires.
         register_expiration=user_input.get(

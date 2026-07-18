@@ -40,10 +40,12 @@ class SipConfig:
     port: int = 5060
     username: str = ""
     password: str = ""
+    auth_username: str = ""
     domain: str = ""
     caller_id: str = ""
     register_expiration: int = 300
     local_rtp_port: int = 7078
+    outbound_proxy: str = ""
 
 
 @dataclass
@@ -112,6 +114,7 @@ class SipClient:
         self._reg_branch = ""
         self._reg_cseq = 0
         self._register_auth_tried = False
+        self._service_routes: str | None = None
 
         # current dialog
         self._d_call_id = ""
@@ -206,19 +209,20 @@ class SipClient:
             self._schedule_register(10)
 
     async def _open_socket(self) -> bool:
+        target_server = self.config.outbound_proxy if self.config.outbound_proxy else self.config.server
         # Resolve via the loop so a slow DNS lookup never blocks the event loop.
         try:
             infos = await self._loop.getaddrinfo(
-                self.config.server,
+                target_server,
                 self.config.port,
                 family=socket.AF_INET,
                 type=socket.SOCK_DGRAM,
             )
         except OSError as err:
-            _LOGGER.warning("Cannot resolve SIP server '%s': %s", self.config.server, err)
+            _LOGGER.warning("Cannot resolve SIP target '%s': %s", target_server, err)
             return False
         if not infos:
-            _LOGGER.warning("No address found for SIP server '%s'", self.config.server)
+            _LOGGER.warning("No address found for SIP target '%s'", target_server)
             return False
         server_addr = infos[0][4]
 
@@ -248,7 +252,7 @@ class SipClient:
         if self._transport is None:
             return
         self._transport.sendto(msg.encode("utf-8"))
-        _LOGGER.log(5, "TX >>>\n%s", msg)
+
 
     def _emit(self, name: str, *args) -> None:
         """Invoke a user callback, never letting its failure break SIP logic."""
@@ -399,6 +403,8 @@ class SipClient:
             self._reg_attempts = 0
             self._set_state(SipState.REGISTERED)
             self._schedule_register(max(self.config.register_expiration // 2, 30))
+            if sr := m.header("Service-Route"):
+                self._service_routes = sr
             if not was:
                 _LOGGER.info("Registered with %s", self.config.server)
                 self._emit("on_registered")
@@ -420,14 +426,16 @@ class SipClient:
         uri = f"sip:{self.config.domain}"
         nc = "00000001"
         cnonce = sm.gen_random_hex(8)
+        auth_user = self.config.auth_username or self.config.username
         resp = digest_response(
-            self.config.username, self.config.password, realm, "REGISTER", uri,
+            auth_user, self.config.password, realm, "REGISTER", uri,
             nonce, "auth" if qop else "", nc, cnonce,
         )
         self._reg_cseq += 1
         self._reg_branch = sm.gen_branch()
         msg = self._build_register()
-        auth = self._digest_auth_line(proxy, realm, nonce, uri, resp, qop, nc, cnonce, opaque)
+        auth_user = self.config.auth_username or self.config.username
+        auth = self._digest_auth_line(proxy, auth_user, realm, nonce, uri, resp, qop, nc, cnonce, opaque)
         return msg.replace("Content-Length:", auth + "Content-Length:", 1)
 
     # -- outbound call --------------------------------------------------
@@ -520,10 +528,15 @@ class SipClient:
 
     def _build_invite(self) -> str:
         sdp = self._local_sdp()
-        return (
+        msg = (
             f"INVITE {self._d_remote_target} SIP/2.0\r\n"
             f"Via: SIP/2.0/UDP {self._local_ip}:{self._local_port};branch={self._d_branch};rport\r\n"
             "Max-Forwards: 70\r\n"
+        )
+        if self._service_routes:
+            msg += f"Route: {self._service_routes}\r\n"
+        
+        msg += (
             f"From: {self._d_local}\r\n"
             f"To: {self._d_remote}\r\n"
             f"Call-ID: {self._d_call_id}\r\n"
@@ -534,6 +547,7 @@ class SipClient:
             f"Content-Length: {len(sdp)}\r\n\r\n"
             f"{sdp}"
         )
+        return msg
 
     def _build_ack(self, resp: sm.SipMessage) -> str:
         to = resp.header("To")
@@ -542,16 +556,32 @@ class SipClient:
             cseq = resp.header("CSeq").split()[0]
         except (ValueError, IndexError):
             cseq = str(self._d_cseq)
-        return (
+            
+        if 300 <= resp.status_code < 700:
+            # ACK to a non-2xx response MUST use the exact same branch as the original request
+            branch = self._d_branch
+        else:
+            # ACK to a 2xx response is a new transaction, needs a new branch
+            branch = sm.gen_branch()
+            
+        via = f"SIP/2.0/UDP {self._local_ip}:{self._local_port};branch={branch};rport"
+            
+        msg = (
             f"ACK {target} SIP/2.0\r\n"
-            f"Via: SIP/2.0/UDP {self._local_ip}:{self._local_port};branch={sm.gen_branch()};rport\r\n"
+            f"Via: {via}\r\n"
             "Max-Forwards: 70\r\n"
+        )
+        if self._service_routes and 300 <= resp.status_code < 700:
+            msg += f"Route: {self._service_routes}\r\n"
+
+        msg += (
             f"From: {self._d_local}\r\n"
             f"To: {to or self._d_remote}\r\n"
             f"Call-ID: {self._d_call_id}\r\n"
             f"CSeq: {cseq} ACK\r\n"
             "Content-Length: 0\r\n\r\n"
         )
+        return msg
 
     def _handle_invite_response(self, m: sm.SipMessage) -> None:
         if not self._outbound:
@@ -584,15 +614,16 @@ class SipClient:
             uri = self._d_remote_target
             nc = "00000001"
             cnonce = sm.gen_random_hex(8)
+            auth_user = self.config.auth_username or self.config.username
             resp = digest_response(
-                self.config.username, self.config.password, realm, "INVITE", uri,
+                auth_user, self.config.password, realm, "INVITE", uri,
                 nonce, "auth" if qop else "", nc, cnonce,
             )
             self._d_cseq += 1
             self._d_branch = sm.gen_branch()
             msg = self._build_invite()
             auth = self._digest_auth_line(
-                proxy, realm, nonce, uri, resp, qop, nc, cnonce, opaque
+                proxy, auth_user, realm, nonce, uri, resp, qop, nc, cnonce, opaque
             )
             self._invite_msg = msg.replace("Content-Type:", auth + "Content-Type:", 1)
             self._send_raw(self._invite_msg)
@@ -638,10 +669,10 @@ class SipClient:
         _LOGGER.warning("Call failed: %s %s", m.status_code, m.reason)
         self._end_call()
 
-    def _digest_auth_line(self, proxy, realm, nonce, uri, resp, qop, nc, cnonce, opaque) -> str:
+    def _digest_auth_line(self, proxy, auth_user, realm, nonce, uri, resp, qop, nc, cnonce, opaque) -> str:
         head = "Proxy-Authorization: " if proxy else "Authorization: "
         auth = (
-            f'{head}Digest username="{self.config.username}", realm="{realm}", '
+            f'{head}Digest username="{auth_user}", realm="{realm}", '
             f'nonce="{nonce}", uri="{uri}", response="{resp}", algorithm=MD5'
         )
         if qop:
@@ -958,7 +989,7 @@ class SipClient:
         # take down the UDP listener or the integration.
         try:
             raw = data.decode("utf-8", errors="replace")
-            _LOGGER.log(5, "RX <<<\n%s", raw)
+
             m = sm.parse_sip_message(raw)
             if m.is_request:
                 self._handle_request(m)

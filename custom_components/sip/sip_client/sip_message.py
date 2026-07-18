@@ -66,6 +66,7 @@ def parse_sip_message(raw: str) -> SipMessage:
         msg.body = raw[header_end + 4:]
 
     first = True
+    last_name = None
     for line in head.split("\r\n"):
         if first:
             first = False
@@ -86,15 +87,24 @@ def parse_sip_message(raw: str) -> SipMessage:
                         msg.request_uri = parts[1].strip()
             continue
 
+        if line.startswith(" ") or line.startswith("\t"):
+            # Header folding: continuation of the previous header
+            if last_name and last_name in msg.headers:
+                msg.headers[last_name] += " " + line.strip()
+            continue
+
         colon = line.find(":")
         if colon == -1:
             continue
         name = line[:colon].strip().lower()
         name = _COMPACT_HEADERS.get(name, name)
         value = line[colon + 1:].strip()
-        # Keep the first occurrence (topmost Via, etc.).
+        last_name = name
+        # Keep the first occurrence (topmost Via, etc.), except for Service-Route.
         if name not in msg.headers:
             msg.headers[name] = value
+        elif name == "service-route":
+            msg.headers[name] += f", {value}"
     return msg
 
 

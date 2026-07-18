@@ -13,6 +13,8 @@ CONF_DOMAIN = "domain"
 CONF_CALLER_ID = "caller_id"
 CONF_REGISTER_EXPIRATION = "register_expiration"
 CONF_LOCAL_RTP_PORT = "local_rtp_port"
+CONF_OUTBOUND_PROXY = "outbound_proxy"
+CONF_AUTH_USERNAME = "authentication_username"
 
 # Defaults
 DEFAULT_PORT = 5060

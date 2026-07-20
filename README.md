@@ -15,6 +15,7 @@ A native custom integration for Home Assistant to connect directly to a SIP serv
 ## Features & Platforms
 
 - **Native Media Player Entity**: Exposes the SIP line as a `media_player` entity. Stream standard TTS messages (e.g. Google Translate, Piper, Nabu Casa) or audio URLs directly into the active SIP call.
+- **Browser Two-Way Audio** *(new)*: Hear the caller through your browser and speak back using your microphone — no host speakers or PulseAudio required.  Includes a custom Lovelace card (`sip-call-card`) that streams live Opus/WebM audio from the caller and captures your microphone audio via `getUserMedia()`.
 - **Custom Telephony Services**: Complete set of services to control SIP calls (`sip.dial`, `sip.hangup`, `sip.answer`, `sip.send_dtmf`, `sip.start_recording`, `sip.stop_recording`, `sip.start_assist`).
 - **Interactive Voice Response (IVR) Engine**: Construct nested DTMF automated phone trees with TTS prompt templates, custom PIN authentication, and native Home Assistant service triggers.
 - **Voice Assist Integration**: Bidirectional audio streaming between the SIP call and Home Assistant's Voice Assist pipeline, utilizing active 8kHz to 16kHz resampling.
@@ -25,6 +26,57 @@ A native custom integration for Home Assistant to connect directly to a SIP serv
 1. **HACS**: Add this repository (`eigger/hass-sip`) to HACS as a custom repository, or 
    **Manual**: Copy the `custom_components/sip` directory into your Home Assistant `custom_components` folder.
 2. Restart Home Assistant.
+
+---
+
+## Browser Two-Way Audio (Live Call Card)
+
+When a SIP call is active, hass-sip exposes a live Opus/WebM audio stream of the caller's voice via an HTTP endpoint, and accepts browser microphone audio via a companion POST endpoint.  A custom Lovelace card (`sip-call-card`) ties these together for a complete browser-based telephone experience.
+
+### Requirements
+
+- **ffmpeg with `libopus`**: The integration transcodes 8 kHz PCM → Opus/WebM on the fly.  Most HA OS / Supervised installs include this already.  Verify with `ffmpeg -encoders 2>&1 | grep libopus`.
+- **HTTPS or localhost**: `getUserMedia()` (mic capture) is only available on secure origins.  If your HA frontend is served over HTTP (not localhost), the mic button will not work.  Use the HA cloud (Nabu Casa) or set up a local certificate.
+
+### Adding the Lovelace card
+
+1. Go to **Settings** → **Dashboards** → **Resources** (⋮ menu in the top right).
+2. Click **Add resource**, set URL to `/sip/static/sip-call-card.js`, type = **JavaScript module**.
+3. Reload the page.
+4. Add a new card to your dashboard, choose **Custom: SIP Call Card**, and set the `entity` to your SIP media_player entity id:
+
+```yaml
+type: custom:sip-call-card
+entity: media_player.sip_client_100_phone_line
+title: Intercom   # optional
+```
+
+### Card usage
+
+| Button | Description |
+|--------|-------------|
+| 📞 **Answer** | Answers an incoming call (calls `sip.answer`). |
+| 📵 **Hang Up** | Ends the current call (calls `sip.hangup`). |
+| 🔊 **Listen** | Starts playing the caller's audio in the browser.  Click after answering — required due to browser autoplay policy. |
+| 🎤 **Mic On / Mic Off** | Toggles microphone capture.  The browser will prompt for mic permission on the first click.  Your voice is streamed to the caller in ~200 ms chunks. |
+
+### Attributes exposed on the `media_player` entity
+
+While a call is active the entity exposes the following extra attributes that automations or custom cards can use:
+
+| Attribute | Description |
+|-----------|-------------|
+| `rx_stream_url` | Full URL of the live Opus/WebM audio stream of the caller's voice. |
+| `tx_audio_url` | Full URL of the POST endpoint that accepts browser mic audio blobs. |
+
+### Known limitations
+
+- **Single active listener**: Each browser tab that opens the RX stream runs its own ffmpeg transcoder.  Many concurrent listeners will use proportionally more CPU.
+- **Latency**: Expect ~300–800 ms end-to-end due to Opus framing and HTTP chunked transfer.  For lower latency, a WebRTC approach would be needed.
+- **Mic only where you answered**: The `getUserMedia()` mic capture only works in the specific browser tab/device where the user presses "Mic On".  Other open tabs sharing the same entity don't capture mic input.
+- **No simultaneous host speaker + browser audio**: The integration now uses the HTTP stream sink as the primary RX sink.  The host-speaker path (`SpeakerSink` / PulseAudio) is no longer automatically activated alongside the browser stream.  If you still need local speaker output, wire it up manually via a `WavRecorderSink` or the `diagnostic_speakersink.py` script.
+
+
 
 ## Configuration
 

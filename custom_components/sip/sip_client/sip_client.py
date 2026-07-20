@@ -160,6 +160,19 @@ class SipClient:
     def set_sink(self, sink: AudioSink) -> None:
         self.sink = sink
 
+    def push_tx_audio(self, pcm: bytes) -> None:
+        """Push a raw 8 kHz s16le mono PCM frame directly into the TX path.
+
+        This is the external entry-point used by the browser-mic HTTP handler to
+        inject microphone audio into the active call.  Silently ignored when the
+        line is not in-call or the frame length is wrong.
+        """
+        if self.in_call:
+            try:
+                self.rtp.push_tx_audio(pcm)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("push_tx_audio error (ignored): %s", exc)
+
     # -- lifecycle ------------------------------------------------------
     async def start(self) -> None:
         self._closing = False

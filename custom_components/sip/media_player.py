@@ -96,12 +96,16 @@ class SipMediaPlayer(MediaPlayerEntity):
     # -- read-only call/playback info shown on the card -----------------
     @property
     def media_content_type(self) -> str | None:
-        """Mark playback as music so the card renders the now-playing area."""
-        if (
-            self.entry_data.get("state") == SipState.IN_CALL
-            and self._client.media_playing
-        ):
+        """Mark playback as music/audio so the card renders the now-playing area."""
+        if self.entry_data.get("state") == SipState.IN_CALL:
             return MediaType.MUSIC
+        return None
+
+    @property
+    def media_content_id(self) -> str | None:
+        """URL of the live RX audio stream while the call is active."""
+        if self.entry_data.get("state") == SipState.IN_CALL:
+            return self.entry_data.get("rx_stream_url")
         return None
 
     @property
@@ -130,12 +134,20 @@ class SipMediaPlayer(MediaPlayerEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose call details for dashboards/automations."""
         state = self.entry_data.get("state", SipState.IDLE)
-        return {
+        attrs: dict[str, Any] = {
             "sip_state": str(state),
             "remote_party": self.entry_data.get("call_number") or "",
             "remote_name": self.entry_data.get("last_caller") or "",
             "call_direction": self.entry_data.get("call_direction"),
         }
+        # Expose stream URLs while a call is active so custom cards can use them
+        rx_url = self.entry_data.get("rx_stream_url")
+        tx_url = self.entry_data.get("tx_audio_url")
+        if rx_url:
+            attrs["rx_stream_url"] = rx_url
+        if tx_url:
+            attrs["tx_audio_url"] = tx_url
+        return attrs
 
     # -- controls -------------------------------------------------------
     async def async_browse_media(

@@ -129,7 +129,6 @@ class SipRxStreamView(HomeAssistantView):
         response.content_type = "audio/webm;codecs=opus"
         response.headers["Cache-Control"] = "no-cache, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Access-Control-Allow-Origin"] = "*"
         # Instruct nginx/Ingress to NOT buffer this stream
         response.headers["X-Accel-Buffering"] = "no"
 
@@ -284,6 +283,7 @@ class SipTxAudioView(HomeAssistantView):
 
         # Inject 20 ms frames into the RTP TX path
         injected = 0
+        failed = 0
         for offset in range(0, len(stdout), FRAME_BYTES):
             frame = stdout[offset : offset + FRAME_BYTES]
             if len(frame) == FRAME_BYTES and client.in_call:
@@ -291,11 +291,20 @@ class SipTxAudioView(HomeAssistantView):
                     client.push_tx_audio(frame)
                     injected += 1
                 except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("TX audio: push error: %s", err)
-                    break
+                    failed += 1
+                    _LOGGER.debug(
+                        "TX audio: frame %d push error: %s",
+                        offset // FRAME_BYTES, err,
+                    )
 
-        _LOGGER.debug(
-            "TX audio: injected %d frames (%d bytes PCM) for entry %s",
-            injected, len(stdout), entry_id,
-        )
+        if failed:
+            _LOGGER.debug(
+                "TX audio: injected %d frames, %d failed for entry %s",
+                injected, failed, entry_id,
+            )
+        else:
+            _LOGGER.debug(
+                "TX audio: injected %d frames (%d bytes PCM) for entry %s",
+                injected, len(stdout), entry_id,
+            )
         return web.Response(status=204)

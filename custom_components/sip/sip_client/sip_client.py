@@ -170,8 +170,8 @@ class SipClient:
         if self.in_call:
             try:
                 self.rtp.push_tx_audio(pcm)
-            except Exception:  # noqa: BLE001
-                _LOGGER.debug("push_tx_audio error (ignored)")
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("push_tx_audio error (ignored): %s", exc)
 
     # -- lifecycle ------------------------------------------------------
     async def start(self) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import os
 import time
 from typing import Any
 
@@ -156,9 +157,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(SipRxStreamView())
         hass.http.register_view(SipTxAudioView())
         # Serve the companion Lovelace card from the integration's www/ directory
-        import os as _os
-        _www = _os.path.join(_os.path.dirname(__file__), "www")
-        if _os.path.isdir(_www):
+        _www = os.path.join(os.path.dirname(__file__), "www")
+        if os.path.isdir(_www):
             hass.http.register_static_path(
                 "/sip/static",
                 _www,

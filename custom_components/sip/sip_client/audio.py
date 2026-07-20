@@ -231,8 +231,8 @@ class HttpStreamSink(AudioSink):
                 try:
                     q.get_nowait()
                     q.put_nowait(pcm_le)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.debug("HttpStreamSink queue operation failed: %s", exc)
 
     def subscribe(self) -> "asyncio.Queue[bytes | None]":
         """Register a new consumer; returns a queue that receives PCM chunks.

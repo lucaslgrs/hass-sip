@@ -35,7 +35,7 @@ When a SIP call is active, hass-sip exposes a live Opus/WebM audio stream of the
 
 ### Requirements
 
-- **ffmpeg with `libopus`**: The integration transcodes 8 kHz PCM → Opus/WebM on the fly.  Most HA OS / Supervised installs include this already.  Verify with `ffmpeg -codecs 2>&1 | grep opus`.
+- **ffmpeg with `libopus`**: The integration transcodes 8 kHz PCM → Opus/WebM on the fly.  Most HA OS / Supervised installs include this already.  Verify with `ffmpeg -encoders 2>&1 | grep libopus`.
 - **HTTPS or localhost**: `getUserMedia()` (mic capture) is only available on secure origins.  If your HA frontend is served over HTTP (not localhost), the mic button will not work.  Use the HA cloud (Nabu Casa) or set up a local certificate.
 
 ### Adding the Lovelace card

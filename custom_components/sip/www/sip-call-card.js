@@ -329,7 +329,7 @@ class SipCallCard extends HTMLElement {
 
   _stopMic() {
     if (this._mediaRecorder) {
-      try { this._mediaRecorder.stop(); } catch (_) {}
+      try { this._mediaRecorder.stop(); } catch (err) { console.debug("MediaRecorder stop error:", err); }
       this._mediaRecorder = null;
     }
     if (this._micStream) {

@@ -77,31 +77,28 @@ class WavRecorderSink(AudioSink):
 
 
 class SpeakerSink(AudioSink):
-    """Routes received 8kHz RTP audio through ffmpeg to system speaker or media player.
+    """Routes received 8kHz RTP audio to system speaker via ffmpeg.
     
-    This sink buffers PCM audio and streams it to a configured audio output device
-    via ffmpeg, enabling real-time incoming call audio playback on a local speaker.
+    This sink buffers incoming call audio and streams it in real-time to the
+    system's default audio output device using PulseAudio, enabling incoming 
+    callers to be heard through a local speaker.
     """
 
-    def __init__(self, ffmpeg_bin: str = "ffmpeg", speaker_device: str | None = None) -> None:
+    def __init__(self, ffmpeg_bin: str = "ffmpeg") -> None:
         """Initialize the speaker sink.
         
         Args:
-            ffmpeg_bin: Path to ffmpeg binary
-            speaker_device: Optional ffmpeg device name (e.g. 'pulse' for PulseAudio, 
-                          'default' for ALSA). If None, uses ffmpeg's default output.
+            ffmpeg_bin: Path to ffmpeg binary (default: 'ffmpeg' in PATH)
         """
         self._bin = ffmpeg_bin
-        self._speaker_device = speaker_device
         self._proc = None
-        self._loop = None
         self._proc_task = None
         self._buffer_queue: asyncio.Queue[bytes] | None = None
         self._is_active = False
         self.bytes_written = 0
 
     def _start_ffmpeg(self) -> None:
-        """Start the ffmpeg process for audio playback (called on first write)."""
+        """Start ffmpeg process on first write."""
         if self._is_active:
             return
         self._is_active = True
@@ -116,31 +113,20 @@ class SpeakerSink(AudioSink):
         self._proc_task = self._loop.create_task(self._run_ffmpeg())
 
     async def _run_ffmpeg(self) -> None:
-        """Run ffmpeg process and stream audio to it."""
+        """Run ffmpeg process to stream audio to speakers."""
         try:
+            # Use PulseAudio (most common on Linux/HA)
             cmd = [
                 self._bin,
                 "-hide_banner",
-                "-loglevel",
-                "error",
-                "-f",
-                "s16le",
-                "-ar",
-                "8000",
-                "-ac",
-                "1",
-                "-i",
-                "pipe:0",
+                "-loglevel", "error",
+                "-f", "s16le",
+                "-ar", "8000",
+                "-ac", "1",
+                "-i", "pipe:0",
+                "-f", "pulse",
+                "-",
             ]
-            
-            # Add output device/format based on platform
-            if self._speaker_device:
-                cmd.extend(["-f", "alsa", "-"])
-                cmd.extend([self._speaker_device])
-            else:
-                # Use default output (works on most systems)
-                cmd.extend(["-f", "pulse", "-"])
-                cmd.append("default")
 
             self._proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -149,26 +135,29 @@ class SpeakerSink(AudioSink):
                 stderr=asyncio.subprocess.DEVNULL,
             )
             
-            _LOGGER.info("SpeakerSink ffmpeg process started")
+            _LOGGER.debug("SpeakerSink: ffmpeg process started (PID %s)", self._proc.pid)
             
             # Feed queued audio to ffmpeg stdin
             while self._is_active and self._proc is not None:
                 try:
-                    chunk = await asyncio.wait_for(self._buffer_queue.get(), timeout=1.0)
+                    chunk = await asyncio.wait_for(self._buffer_queue.get(), timeout=2.0)
                     if self._proc.stdin:
                         self._proc.stdin.write(chunk)
                         await self._proc.stdin.drain()
                 except asyncio.TimeoutError:
-                    # Keep the process alive even if no audio
+                    # Keep-alive: drain to detect broken pipe
                     if self._proc.stdin:
-                        await self._proc.stdin.drain()
+                        try:
+                            await self._proc.stdin.drain()
+                        except Exception:
+                            pass
                 except asyncio.CancelledError:
                     break
                 except Exception as err:
                     _LOGGER.debug("SpeakerSink ffmpeg write error: %s", err)
                     break
         except Exception as err:
-            _LOGGER.warning("SpeakerSink ffmpeg error: %s", err)
+            _LOGGER.debug("SpeakerSink ffmpeg error: %s", err)
         finally:
             if self._proc is not None and self._proc.stdin is not None:
                 try:
@@ -180,10 +169,10 @@ class SpeakerSink(AudioSink):
                     await self._proc.wait()
                 except Exception:
                     pass
-            _LOGGER.info("SpeakerSink ffmpeg process stopped")
+            _LOGGER.debug("SpeakerSink: ffmpeg process stopped")
 
     def write(self, pcm_le: bytes) -> None:
-        """Buffer received PCM audio for playback."""
+        """Queue incoming PCM audio for playback."""
         if not self._is_active:
             self._start_ffmpeg()
 
@@ -191,17 +180,17 @@ class SpeakerSink(AudioSink):
 
         if self._buffer_queue is not None and self._is_active:
             try:
+                # Non-blocking put; discard oldest if queue is full (prioritize fresh audio)
                 self._buffer_queue.put_nowait(pcm_le)
             except asyncio.QueueFull:
-                # Drop oldest audio if queue is full (prefer fresh audio)
                 try:
-                    self._buffer_queue.get_nowait()
+                    self._buffer_queue.get_nowait()  # drop oldest
                     self._buffer_queue.put_nowait(pcm_le)
                 except Exception:
                     pass
 
     def close(self) -> None:
-        """Stop the speaker sink and shut down ffmpeg."""
+        """Shut down the speaker sink and ffmpeg process."""
         self._is_active = False
         if self._proc_task is not None:
             self._proc_task.cancel()

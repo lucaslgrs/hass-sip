@@ -42,6 +42,7 @@ class SipCallCard extends HTMLElement {
     this._mediaRecorder = null;
     this._micStream = null;
     this._micActive = false;
+    this._micFirstChunk = false;
     this._txUrl = null;
     this._rxUrl = null;
     this._entryId = null;
@@ -243,15 +244,11 @@ class SipCallCard extends HTMLElement {
   _startListen() {
     const audio = this._el.audio;
     if (!this._rxUrl) return;
-    // Use HA auth token in Authorization header via a fetch + MediaSource approach
-    // falls back to src= with ?auth_callback for browsers that support it
-    const token = this._hass?.auth?.data?.access_token;
-    let url = this._rxUrl;
-    // Append token as query param (HA accepts it for streaming endpoints)
-    if (token) {
-      url = url + (url.includes("?") ? "&" : "?") + "auth_callback=1&token=" + encodeURIComponent(token);
-    }
-    audio.src = url;
+    // The rx_stream_url exposed by the entity is already a signed path —
+    // use it verbatim.  Do NOT append any token query parameters here;
+    // the <audio> element cannot send an Authorization header and HA's
+    // HTTP auth middleware only accepts signed paths (not a raw token= param).
+    audio.src = this._rxUrl;
     audio.style.display = "block";
     audio.play().catch(err => {
       console.warn("SIP RX autoplay blocked:", err);
@@ -286,6 +283,7 @@ class SipCallCard extends HTMLElement {
 
     this._micStream = stream;
     this._micActive = true;
+    this._micFirstChunk = true;  // track whether this is the first chunk (has container header)
     this._el.btnMic.textContent = "🎤 Mic Off";
     this._el.btnMic.classList.add("active");
     this._el.note.textContent = "Microphone active — your voice is being sent to the caller.";
@@ -313,7 +311,14 @@ class SipCallCard extends HTMLElement {
       if (token) headers["Authorization"] = "Bearer " + token;
 
       try {
-        await fetch(txUrl, {
+        // The first chunk contains the full container/codec header (EBML for WebM,
+        // OGG headers for Ogg/Opus).  Signal the server to start a new persistent
+        // ffmpeg session and seed it with this first chunk.  Subsequent chunks are
+        // headerless continuations that must be fed to the *same* process stdin.
+        const isFirst = this._micFirstChunk;
+        this._micFirstChunk = false;
+        const url = isFirst ? txUrl + "?action=start" : txUrl;
+        await fetch(url, {
           method: "POST",
           headers,
           body: event.data,
@@ -337,9 +342,17 @@ class SipCallCard extends HTMLElement {
       this._micStream = null;
     }
     this._micActive = false;
+    this._micFirstChunk = false;
     if (this._el && this._el.btnMic) {
       this._el.btnMic.textContent = "🎤 Mic On";
       this._el.btnMic.classList.remove("active");
+    }
+    // Signal the server to stop the persistent ffmpeg decode session
+    if (this._txUrl) {
+      const token = this._hass?.auth?.data?.access_token;
+      const headers = {};
+      if (token) headers["Authorization"] = "Bearer " + token;
+      fetch(this._txUrl + "?action=stop", { method: "POST", headers }).catch(() => {});
     }
   }
 

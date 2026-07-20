@@ -50,7 +50,7 @@ def _sip_device_id(hass: HomeAssistant, entry_id: str) -> str | None:
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry_id)})
     return device.id if device else None
 
-from .http_views import SipRxStreamView, SipTxAudioView
+from .http_views import SipRxStreamView, SipTxAudioView, _stop_tx_session
 from .sip_client.audio import FfmpegAudioSource, HttpStreamSink, SpeakerSink
 from .sip_client.sip_client import SipCallbacks, SipClient, SipConfig, SipState
 
@@ -293,25 +293,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         http_sink = HttpStreamSink()
         entry.runtime_data["http_sink"] = http_sink
 
-        # Build and store the browser-facing stream URLs
+        # Build base URL for constructing stream URLs
         try:
             from homeassistant.helpers.network import get_url
             base = get_url(hass, prefer_internal=True)
         except Exception:
             base = ""
-        entry.runtime_data["rx_stream_url"] = (
-            f"{base}/api/sip/rx_stream/{entry.entry_id}"
-        )
+
+        # tx_audio_url uses a plain URL (TX endpoint accepts ****** from fetch())
         entry.runtime_data["tx_audio_url"] = (
             f"{base}/api/sip/tx_audio/{entry.entry_id}"
         )
 
+        # rx_stream_url must be a signed path because <audio src=...> cannot
+        # send an Authorization header.  Generate it asynchronously and update
+        # the entity state once the signed URL is ready.  The "Listen" button
+        # stays disabled (rx_stream_url is None) until signing completes.
+        entry.runtime_data["rx_stream_url"] = None
+
+        async def _sign_rx_url() -> None:
+            rx_path = f"/api/sip/rx_stream/{entry.entry_id}"
+            try:
+                from homeassistant.components.http.auth import async_sign_path
+                signed_path = await async_sign_path(
+                    hass, rx_path, datetime.timedelta(hours=4)
+                )
+                entry.runtime_data["rx_stream_url"] = f"{base}{signed_path}"
+                LOGGER.debug(
+                    "[%s] Signed RX stream URL ready", sip_config.username
+                )
+            except Exception as err:
+                # Fall back to the plain URL — the browser will get auth errors
+                # unless a different auth mechanism applies, but at least it
+                # won't silently fail to show the Listen button.
+                LOGGER.warning(
+                    "[%s] Could not sign RX stream URL (%s); using plain URL",
+                    sip_config.username, err,
+                )
+                entry.runtime_data["rx_stream_url"] = (
+                    f"{base}/api/sip/rx_stream/{entry.entry_id}"
+                )
+            finally:
+                # Push a state update so the frontend picks up the signed URL.
+                async_dispatcher_send(hass, f"{DOMAIN}_state_update_{entry.entry_id}")
+
+        hass.async_create_task(_sign_rx_url())
+
         # Use the HTTP sink as the primary sink for RX audio
         client.set_sink(http_sink)
         LOGGER.info(
-            "[%s] HTTP stream sink activated, stream URL: %s",
+            "[%s] HTTP stream sink activated, TX URL: %s",
             sip_config.username,
-            entry.runtime_data["rx_stream_url"],
+            entry.runtime_data["tx_audio_url"],
         )
 
     @callback
@@ -381,6 +414,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if http_sink is not None:
             http_sink.close()
             http_sink = None
+        # Stop any active TX mic session (persistent ffmpeg process)
+        hass.async_create_task(_stop_tx_session(entry.runtime_data))
         # Clear stream URLs so the media_player entity stops pointing at a dead stream
         entry.runtime_data["http_sink"] = None
         entry.runtime_data["rx_stream_url"] = None
@@ -536,6 +571,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         http_sink_inst: HttpStreamSink | None = entry_data.get("http_sink")
         if http_sink_inst is not None:
             http_sink_inst.close()
+        # Stop any active TX mic session (persistent ffmpeg process)
+        await _stop_tx_session(entry_data)
 
     # Remove per-entry data from hass.data
     if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:

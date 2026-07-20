@@ -159,11 +159,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Serve the companion Lovelace card from the integration's www/ directory
         _www = os.path.join(os.path.dirname(__file__), "www")
         if os.path.isdir(_www):
-            hass.http.register_static_path(
-                "/sip/static",
-                _www,
-                cache_headers=False,
-            )
+            try:
+                # Home Assistant 2024.7+ removed the synchronous
+                # register_static_path in favor of the async, batched API.
+                from homeassistant.components.http import StaticPathConfig
+
+                await hass.http.async_register_static_paths(
+                    [
+                        StaticPathConfig(
+                            "/sip/static",
+                            _www,
+                            cache_headers=False,
+                        )
+                    ]
+                )
+            except ImportError:
+                # Fallback for older Home Assistant Core versions that still
+                # expose the synchronous register_static_path method.
+                hass.http.register_static_path(
+                    "/sip/static",
+                    _www,
+                    cache_headers=False,
+                )
         hass.data[DOMAIN]["views_registered"] = True
         LOGGER.debug("SIP: HTTP views and static paths registered")
 

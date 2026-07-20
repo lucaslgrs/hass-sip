@@ -76,6 +76,144 @@ class WavRecorderSink(AudioSink):
             pass
 
 
+class SpeakerSink(AudioSink):
+    """Routes received 8kHz RTP audio through ffmpeg to system speaker or media player.
+    
+    This sink buffers PCM audio and streams it to a configured audio output device
+    via ffmpeg, enabling real-time incoming call audio playback on a local speaker.
+    """
+
+    def __init__(self, ffmpeg_bin: str = "ffmpeg", speaker_device: str | None = None) -> None:
+        """Initialize the speaker sink.
+        
+        Args:
+            ffmpeg_bin: Path to ffmpeg binary
+            speaker_device: Optional ffmpeg device name (e.g. 'pulse' for PulseAudio, 
+                          'default' for ALSA). If None, uses ffmpeg's default output.
+        """
+        self._bin = ffmpeg_bin
+        self._speaker_device = speaker_device
+        self._proc = None
+        self._loop = None
+        self._proc_task = None
+        self._buffer_queue: asyncio.Queue[bytes] | None = None
+        self._is_active = False
+        self.bytes_written = 0
+
+    def _start_ffmpeg(self) -> None:
+        """Start the ffmpeg process for audio playback (called on first write)."""
+        if self._is_active:
+            return
+        self._is_active = True
+
+        try:
+            self._loop = asyncio.get_event_loop()
+        except RuntimeError:
+            _LOGGER.warning("No event loop available for SpeakerSink")
+            return
+
+        self._buffer_queue = asyncio.Queue()
+        self._proc_task = self._loop.create_task(self._run_ffmpeg())
+
+    async def _run_ffmpeg(self) -> None:
+        """Run ffmpeg process and stream audio to it."""
+        try:
+            cmd = [
+                self._bin,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "s16le",
+                "-ar",
+                "8000",
+                "-ac",
+                "1",
+                "-i",
+                "pipe:0",
+            ]
+            
+            # Add output device/format based on platform
+            if self._speaker_device:
+                cmd.extend(["-f", "alsa", "-"])
+                cmd.extend([self._speaker_device])
+            else:
+                # Use default output (works on most systems)
+                cmd.extend(["-f", "pulse", "-"])
+                cmd.append("default")
+
+            self._proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            
+            _LOGGER.info("SpeakerSink ffmpeg process started")
+            
+            # Feed queued audio to ffmpeg stdin
+            while self._is_active and self._proc is not None:
+                try:
+                    chunk = await asyncio.wait_for(self._buffer_queue.get(), timeout=1.0)
+                    if self._proc.stdin:
+                        self._proc.stdin.write(chunk)
+                        await self._proc.stdin.drain()
+                except asyncio.TimeoutError:
+                    # Keep the process alive even if no audio
+                    if self._proc.stdin:
+                        await self._proc.stdin.drain()
+                except asyncio.CancelledError:
+                    break
+                except Exception as err:
+                    _LOGGER.debug("SpeakerSink ffmpeg write error: %s", err)
+                    break
+        except Exception as err:
+            _LOGGER.warning("SpeakerSink ffmpeg error: %s", err)
+        finally:
+            if self._proc is not None and self._proc.stdin is not None:
+                try:
+                    self._proc.stdin.close()
+                except Exception:
+                    pass
+            if self._proc is not None:
+                try:
+                    await self._proc.wait()
+                except Exception:
+                    pass
+            _LOGGER.info("SpeakerSink ffmpeg process stopped")
+
+    def write(self, pcm_le: bytes) -> None:
+        """Buffer received PCM audio for playback."""
+        if not self._is_active:
+            self._start_ffmpeg()
+
+        self.bytes_written += len(pcm_le)
+
+        if self._buffer_queue is not None and self._is_active:
+            try:
+                self._buffer_queue.put_nowait(pcm_le)
+            except asyncio.QueueFull:
+                # Drop oldest audio if queue is full (prefer fresh audio)
+                try:
+                    self._buffer_queue.get_nowait()
+                    self._buffer_queue.put_nowait(pcm_le)
+                except Exception:
+                    pass
+
+    def close(self) -> None:
+        """Stop the speaker sink and shut down ffmpeg."""
+        self._is_active = False
+        if self._proc_task is not None:
+            self._proc_task.cancel()
+            self._proc_task = None
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+            except ProcessLookupError:
+                pass
+            self._proc = None
+
+
 class FfmpegAudioSource(AudioSource):
     """Decode any media (file path, URL, or raw bytes) to 8 kHz mono via ffmpeg.
 

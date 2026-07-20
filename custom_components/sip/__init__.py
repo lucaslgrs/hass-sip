@@ -49,7 +49,7 @@ def _sip_device_id(hass: HomeAssistant, entry_id: str) -> str | None:
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry_id)})
     return device.id if device else None
 
-from .sip_client.audio import FfmpegAudioSource
+from .sip_client.audio import FfmpegAudioSource, SpeakerSink
 from .sip_client.sip_client import SipCallbacks, SipClient, SipConfig, SipState
 
 PLATFORMS = [
@@ -169,6 +169,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Active session state helpers
     ivr_session: IvrSession | None = None
     assist_bridge: AssistBridge | None = None
+    speaker_sink: SpeakerSink | None = None
 
     def fire_sip_event(event_type: str, extra_data: dict[str, Any] | None = None) -> None:
         data = {
@@ -287,13 +288,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.runtime_data["call_number"] = ""
 
         fire_sip_event(EVENT_SIP_CALL_ENDED)
-        nonlocal ivr_session, assist_bridge
+        nonlocal ivr_session, assist_bridge, speaker_sink
         if ivr_session is not None:
             ivr_session.close()
             ivr_session = None
         if assist_bridge is not None:
             assist_bridge.close()
             assist_bridge = None
+        if speaker_sink is not None:
+            speaker_sink.close()
+            speaker_sink = None
         async_dispatcher_send(hass, f"{DOMAIN}_state_update_{entry.entry_id}")
 
     @callback
@@ -395,6 +399,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client.set_sink(assist_bridge)
         assist_bridge.start()
 
+    # Helper function to activate speaker output for incoming calls
+    async def activate_speaker_internal() -> None:
+        nonlocal speaker_sink
+        if speaker_sink is not None:
+            speaker_sink.close()
+        
+        speaker_sink = SpeakerSink(ffmpeg_bin=get_ffmpeg_bin(hass))
+        client.set_sink(speaker_sink)
+        LOGGER.info("[%s] Speaker sink activated for incoming call audio", sip_config.username)
+
     # Keep a dict of active IVR/Assist objects we can update
     entry_data = entry.runtime_data
 
@@ -405,9 +419,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data["play_message_fn"] = play_message_internal
     entry_data["play_audio_file_fn"] = play_audio_file_internal
     entry_data["trigger_assist_fn"] = trigger_assist_internal
+    entry_data["activate_speaker_fn"] = activate_speaker_internal
     entry_data["set_ivr"] = set_ivr
     entry_data["get_ivr"] = lambda: ivr_session
     entry_data["get_assist"] = lambda: assist_bridge
+    entry_data["get_speaker"] = lambda: speaker_sink
 
     def set_assist(bridge: AssistBridge | None) -> None:
         nonlocal assist_bridge
@@ -601,6 +617,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
 
         for entry_id, data in targets:
             client: SipClient = data["client"]
+
+            # Activate speaker sink for incoming call audio by default
+            await data["activate_speaker_fn"]()
 
             target_menu = menu
             # Auto-create simple announcement menu if message is provided without a menu

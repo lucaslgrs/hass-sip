@@ -49,7 +49,8 @@ def _sip_device_id(hass: HomeAssistant, entry_id: str) -> str | None:
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry_id)})
     return device.id if device else None
 
-from .sip_client.audio import FfmpegAudioSource, SpeakerSink
+from .http_views import SipRxStreamView, SipTxAudioView
+from .sip_client.audio import FfmpegAudioSource, HttpStreamSink, SpeakerSink
 from .sip_client.sip_client import SipCallbacks, SipClient, SipConfig, SipState
 
 PLATFORMS = [
@@ -148,6 +149,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         local_rtp_port=config.get(CONF_LOCAL_RTP_PORT, 7078),
     )
 
+    # Register HTTP views and static JS resource once per HA instance
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+    if not hass.data[DOMAIN].get("views_registered"):
+        hass.http.register_view(SipRxStreamView())
+        hass.http.register_view(SipTxAudioView())
+        # Serve the companion Lovelace card from the integration's www/ directory
+        import os as _os
+        _www = _os.path.join(_os.path.dirname(__file__), "www")
+        if _os.path.isdir(_www):
+            hass.http.register_static_path(
+                "/sip/static",
+                _www,
+                cache_headers=False,
+            )
+        hass.data[DOMAIN]["views_registered"] = True
+        LOGGER.debug("SIP: HTTP views and static paths registered")
+
     # Load contacts asynchronously from file to avoid blocking event loop on startup
     contacts = await hass.async_add_executor_job(load_contacts, hass)
 
@@ -164,12 +183,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "call_status": "missed",
         "contacts": contacts,
         "call_number": "",
+        "rx_stream_url": None,  # set when a call is active
+        "tx_audio_url": None,  # set when a call is active
+        "http_sink": None,  # HttpStreamSink instance during a call
     }
+
+    # Mirror runtime_data into hass.data so HTTP views can find it by entry_id
+    hass.data[DOMAIN][entry.entry_id] = entry.runtime_data
 
     # Active session state helpers
     ivr_session: IvrSession | None = None
     assist_bridge: AssistBridge | None = None
     speaker_sink: SpeakerSink | None = None
+    http_sink: HttpStreamSink | None = None
 
     def fire_sip_event(event_type: str, extra_data: dict[str, Any] | None = None) -> None:
         data = {
@@ -237,16 +263,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def on_prepare_answer() -> None:
         """Fires BEFORE media starts when answer() is called or ACK is received.
-        
-        Use this to activate the speaker sink before any audio arrives.
+
+        Activates the HTTP stream sink (for browser audio playback) and, if a
+        PulseAudio device is present on the HA host, the speaker sink as well.
         """
         LOGGER.info("[%s] Preparing to receive call audio", sip_config.username)
-        nonlocal speaker_sink
-        if speaker_sink is not None:
-            speaker_sink.close()
-        speaker_sink = SpeakerSink(ffmpeg_bin=get_ffmpeg_bin(hass))
-        client.set_sink(speaker_sink)
-        LOGGER.info("[%s] Speaker sink activated (on_prepare_answer)", sip_config.username)
+        nonlocal speaker_sink, http_sink
+
+        # Always spin up the HTTP stream sink so the browser can listen in
+        if http_sink is not None:
+            http_sink.close()
+        http_sink = HttpStreamSink()
+        entry.runtime_data["http_sink"] = http_sink
+
+        # Build and store the browser-facing stream URLs
+        try:
+            from homeassistant.helpers.network import get_url
+            base = get_url(hass, prefer_internal=True)
+        except Exception:
+            base = ""
+        entry.runtime_data["rx_stream_url"] = (
+            f"{base}/api/sip/rx_stream/{entry.entry_id}"
+        )
+        entry.runtime_data["tx_audio_url"] = (
+            f"{base}/api/sip/tx_audio/{entry.entry_id}"
+        )
+
+        # Use the HTTP sink as the primary sink for RX audio
+        client.set_sink(http_sink)
+        LOGGER.info(
+            "[%s] HTTP stream sink activated, stream URL: %s",
+            sip_config.username,
+            entry.runtime_data["rx_stream_url"],
+        )
 
     @callback
     def on_call_connected() -> None:
@@ -302,7 +351,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.runtime_data["call_number"] = ""
 
         fire_sip_event(EVENT_SIP_CALL_ENDED)
-        nonlocal ivr_session, assist_bridge, speaker_sink
+        nonlocal ivr_session, assist_bridge, speaker_sink, http_sink
         if ivr_session is not None:
             ivr_session.close()
             ivr_session = None
@@ -312,6 +361,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if speaker_sink is not None:
             speaker_sink.close()
             speaker_sink = None
+        if http_sink is not None:
+            http_sink.close()
+            http_sink = None
+        # Clear stream URLs so the media_player entity stops pointing at a dead stream
+        entry.runtime_data["http_sink"] = None
+        entry.runtime_data["rx_stream_url"] = None
+        entry.runtime_data["tx_audio_url"] = None
         async_dispatcher_send(hass, f"{DOMAIN}_state_update_{entry.entry_id}")
 
     @callback
@@ -428,6 +484,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data["get_ivr"] = lambda: ivr_session
     entry_data["get_assist"] = lambda: assist_bridge
     entry_data["get_speaker"] = lambda: speaker_sink
+    entry_data["get_http_sink"] = lambda: http_sink
 
     def set_assist(bridge: AssistBridge | None) -> None:
         nonlocal assist_bridge
@@ -458,6 +515,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         set_assist = entry_data.get("set_assist")
         if set_assist:
             set_assist(None)
+        # Close the HTTP stream sink if a call was active during unload
+        http_sink_inst: HttpStreamSink | None = entry_data.get("http_sink")
+        if http_sink_inst is not None:
+            http_sink_inst.close()
+
+    # Remove per-entry data from hass.data
+    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
+        del hass.data[DOMAIN][entry.entry_id]
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

@@ -203,6 +203,67 @@ class SpeakerSink(AudioSink):
             self._proc = None
 
 
+class HttpStreamSink(AudioSink):
+    """Broadcasts incoming 8 kHz s16le PCM to subscribed HTTP consumers.
+
+    Each browser connection subscribes via :meth:`subscribe`, receives a private
+    asyncio.Queue of raw PCM chunks, and is responsible for encoding/streaming
+    that data.  Call :meth:`unsubscribe` when the connection closes.
+
+    The sink is designed to be safe from the synchronous ``write()`` call path:
+    all queue operations are non-blocking (``put_nowait``), and the oldest frame
+    is silently dropped when a subscriber's buffer is full to keep latency low.
+    """
+
+    def __init__(self) -> None:
+        self._subscribers: list[asyncio.Queue[bytes | None]] = []
+        self._is_active = True
+        self.bytes_received = 0
+
+    def write(self, pcm_le: bytes) -> None:
+        """Deliver a PCM frame to all active subscribers."""
+        self.bytes_received += len(pcm_le)
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(pcm_le)
+            except asyncio.QueueFull:
+                # Drop the oldest frame to keep latency low, then insert new one
+                try:
+                    q.get_nowait()
+                    q.put_nowait(pcm_le)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def subscribe(self) -> "asyncio.Queue[bytes | None]":
+        """Register a new consumer; returns a queue that receives PCM chunks.
+
+        A ``None`` sentinel in the queue signals that the stream has ended.
+        """
+        q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=50)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: "asyncio.Queue[bytes | None]") -> None:
+        """Deregister a consumer queue."""
+        if q in self._subscribers:
+            self._subscribers.remove(q)
+        # Best-effort EOF signal so the reader unblocks
+        try:
+            q.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
+
+    def close(self) -> None:
+        """Shut down the sink and notify all subscribers with an EOF sentinel."""
+        self._is_active = False
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        self._subscribers.clear()
+
+
 class FfmpegAudioSource(AudioSource):
     """Decode any media (file path, URL, or raw bytes) to 8 kHz mono via ffmpeg.
 

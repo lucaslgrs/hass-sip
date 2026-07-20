@@ -300,7 +300,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception:
             base = ""
 
-        # tx_audio_url uses a plain URL (TX endpoint accepts ****** from fetch())
+        # tx_audio_url uses a plain URL (TX endpoint accepts Authorization
+        # headers just fine from fetch())
         entry.runtime_data["tx_audio_url"] = (
             f"{base}/api/sip/tx_audio/{entry.entry_id}"
         )
@@ -315,7 +316,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             rx_path = f"/api/sip/rx_stream/{entry.entry_id}"
             try:
                 from homeassistant.components.http.auth import async_sign_path
-                signed_path = await async_sign_path(
+
+                # async_sign_path is a *synchronous* function (despite the
+                # "async_" naming convention used elsewhere in HA for
+                # callback-safe helpers) — it returns a plain str, not a
+                # coroutine.  Awaiting it raises
+                # "TypeError: object str can't be awaited", which was being
+                # silently swallowed by the broad except below and made the
+                # RX stream permanently fall back to an unsigned (and
+                # therefore unauthenticated / banned) URL.
+                signed_path = async_sign_path(
                     hass, rx_path, datetime.timedelta(hours=4)
                 )
                 entry.runtime_data["rx_stream_url"] = f"{base}{signed_path}"

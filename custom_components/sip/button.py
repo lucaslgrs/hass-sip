@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, LOGGER
 from .helpers import build_device_info
 from .sip_client.sip_client import SipClient, SipState
 
@@ -22,7 +22,7 @@ async def async_setup_entry(
     """Set up SIP Client buttons from a config entry."""
     entry_data = entry.runtime_data
     async_add_entities([
-        SipAnswerButton(entry, entry_data),
+        SipAnswerButton(entry, entry_data, hass),
         SipHangupButton(entry, entry_data),
     ])
 
@@ -71,10 +71,11 @@ class SipAnswerButton(SipCallButton):
     _attr_icon = "mdi:phone"
     _attr_translation_key = "answer"
 
-    def __init__(self, entry: ConfigEntry, entry_data: dict[str, Any]) -> None:
+    def __init__(self, entry: ConfigEntry, entry_data: dict[str, Any], hass: HomeAssistant) -> None:
         """Initialize the answer button."""
         super().__init__(entry, entry_data)
         self._attr_unique_id = f"{entry.entry_id}_answer"
+        self.hass = hass
 
     @property
     def _can_press(self) -> bool:
@@ -82,8 +83,22 @@ class SipAnswerButton(SipCallButton):
         return self.entry_data.get("state") == SipState.INCOMING
 
     async def async_press(self) -> None:
-        """Press the button to answer."""
-        self._client.answer()
+        """Press the button to answer and activate speaker sink."""
+        try:
+            # Activate speaker sink for incoming call audio BEFORE answering
+            activate_speaker_fn = self.entry_data.get("activate_speaker_fn")
+            if activate_speaker_fn:
+                await activate_speaker_fn()
+                LOGGER.info(
+                    "[%s] Speaker sink activated for incoming call",
+                    self._config.username
+                )
+            
+            # Now answer the call
+            self._client.answer()
+            LOGGER.info("[%s] Call answered via button", self._config.username)
+        except Exception as err:
+            LOGGER.error("[%s] Error answering call: %s", self._config.username, err)
 
 
 class SipHangupButton(SipCallButton):

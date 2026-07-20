@@ -58,6 +58,7 @@ class SipCallbacks:
     on_call_ended: Callable[[], None] | None = None
     on_dtmf: Callable[[str], None] | None = None
     on_playback_done: Callable[[], None] | None = None
+    on_prepare_answer: Callable[[], None] | None = None  # New: fires before media starts
 
 
 def _choose_payload(sdp: sm.SdpInfo) -> int:
@@ -802,6 +803,7 @@ class SipClient:
                 _LOGGER.info("Auto-answering incoming call from %s (intercom)", caller)
                 self._send_raw(self._build_response(m, 100, "Trying", False))
                 self._set_state(SipState.ANSWERING)
+                self._emit("on_prepare_answer")  # NEW: Fire before media starts
                 self._send_raw(self._build_response(m, 200, "OK", True))
                 self._loop.create_task(self._start_media())
                 self._emit("on_incoming_call", caller)
@@ -847,6 +849,8 @@ class SipClient:
         if self.state != SipState.INCOMING or self._incoming_invite is None:
             _LOGGER.warning("answer() ignored in state %s", self.state)
             return
+        # NEW: Fire on_prepare_answer callback BEFORE starting media
+        self._emit("on_prepare_answer")
         self._loop.create_task(self._start_media())
         self._send_raw(self._build_response(self._incoming_invite, 200, "OK", True))
         self._set_state(SipState.ANSWERING)

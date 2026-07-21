@@ -189,7 +189,7 @@ class SipCallCard extends HTMLElement {
       previous: this._boundRxUrl,
       next: nextUrl,
     });
-    this._el.audio.src = this._rxUrl;
+    this._el.audio.src = nextUrl;
     this._boundRxUrl = nextUrl;
     return true;
   }
@@ -202,9 +202,12 @@ class SipCallCard extends HTMLElement {
       console.debug("SIP RX pausing remote audio.");
       audio.pause();
     }
-    if (audio.getAttribute("src")) {
+    if (audio.src || audio.getAttribute("src")) {
       console.debug("SIP RX clearing audio source.", this._boundRxUrl);
+      audio.pause();
       audio.removeAttribute("src");
+      audio.src = "";
+      try { audio.currentTime = 0; } catch (_) {}
     }
     audio.style.display = "none";
     this._boundRxUrl = null;

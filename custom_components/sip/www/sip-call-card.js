@@ -26,7 +26,7 @@ class SipCallCard extends HTMLElement {
     this._durationTimer = null;
 
     this._remoteAudioEl = document.createElement("audio");
-    this._remoteAudioEl.controls = true;
+    this._remoteAudioEl.controls = false;
     this._remoteAudioEl.playsInline = true;
     this._remoteAudioEl.preload = "none";
     this._remoteAudioEl.style.display = "none";
@@ -203,6 +203,10 @@ class SipCallCard extends HTMLElement {
     if (this._el?.duration && reset) this._el.duration.textContent = "";
   }
 
+  async _sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   _updateState() {
     if (!this._hass || !this._config) return;
     const stateObj = this._hass.states[this._config.entity];
@@ -255,7 +259,7 @@ class SipCallCard extends HTMLElement {
       this._startDurationTimer();
       if (rxUrl) {
         this._bindRemoteAudio();
-        this._el.audio.style.display = "block";
+        this._el.audio.style.display = "none";
         if (this._el.audio.paused && !this._listenStarting) {
           this._listenStarting = true;
           this._el.audio.play().catch(() => {}).finally(() => {
@@ -273,8 +277,20 @@ class SipCallCard extends HTMLElement {
     if (!this._hass) return;
     try {
       await this._hass.callService("sip", "answer", {}, { entity_id: this._config.entity });
-      await this._startMic();
-      this._el.note.textContent = "Call answered — microphone streaming enabled.";
+      await this._sleep(150);
+
+      for (let i = 0; i < 5; i++) {
+        const st = this._hass?.states?.[this._config.entity];
+        this._txUrl = st?.attributes?.tx_audio_url || this._txUrl;
+
+        const started = await this._startMic();
+        if (started || this._micActive) break;
+        await this._sleep(250);
+      }
+
+      this._el.note.textContent = this._micActive
+        ? "Call answered — microphone streaming enabled."
+        : "Call answered, but microphone is not active yet.";
     } catch (e) {
       console.error("SIP answer error:", e);
     }
@@ -293,21 +309,21 @@ class SipCallCard extends HTMLElement {
   }
 
   async _startMic() {
-    if (this._micActive) return;
+    if (this._micActive) return true;
     if (!this._txUrl) {
       this._el.note.textContent = "No active call for mic input.";
-      return;
+      return false;
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       this._el.note.textContent = "getUserMedia not supported in this browser.";
-      return;
+      return false;
     }
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch (err) {
       this._el.note.textContent = `Microphone access denied: ${err.message}`;
-      return;
+      return false;
     }
 
     this._micStream = stream;
@@ -351,6 +367,7 @@ class SipCallCard extends HTMLElement {
     };
 
     recorder.start(200);
+    return true;
   }
 
   _stopMic() {

@@ -9,6 +9,11 @@
  * • Adds in-call duration timer that starts when call enters in_call state.
  */
 
+/**
+ * sip-call-card.js — Custom Lovelace card for hass-sip with modern UI,
+ * mute functionality, duration timer, gate script integration, and WebRTC-friendly ringtone audio.
+ */
+
 class SipCallCard extends HTMLElement {
   constructor() {
     super();
@@ -22,6 +27,7 @@ class SipCallCard extends HTMLElement {
     this._rxUrl = null;
     this._listenStarting = false;
     this._boundRxUrl = null;
+    this._lastSipState = null; // Trava para evitar chamadas repetidas no set hass
 
     this._callStartedAtMs = null;
     this._durationTimer = null;
@@ -32,7 +38,7 @@ class SipCallCard extends HTMLElement {
     this._remoteAudioEl.preload = "none";
     this._remoteAudioEl.style.display = "none";
 
-    // Áudio do toque de chamada (Ringtone)
+    // Elemento de áudio do toque
     this._ringtoneEl = new Audio();
     this._ringtoneEl.loop = true;
   }
@@ -99,7 +105,6 @@ class SipCallCard extends HTMLElement {
           color: var(--text-primary);
         }
 
-        /* Header */
         .card-header {
           display: flex;
           justify-content: space-between;
@@ -123,7 +128,6 @@ class SipCallCard extends HTMLElement {
           margin-top: 2px;
         }
 
-        /* Timer Badge */
         .timer-badge {
           font-size: 0.78rem;
           font-weight: 600;
@@ -134,14 +138,7 @@ class SipCallCard extends HTMLElement {
           border: 1px solid var(--btn-success-border);
         }
 
-        /* Grids de Botões */
-        .grid-buttons-incoming {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-
-        .grid-buttons-incall {
+        .grid-buttons-incoming, .grid-buttons-incall {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 10px;
@@ -151,7 +148,6 @@ class SipCallCard extends HTMLElement {
           grid-column: span 2;
         }
 
-        /* Estilo dos Botões */
         .btn {
           display: inline-flex;
           align-items: center;
@@ -167,25 +163,14 @@ class SipCallCard extends HTMLElement {
           outline: none;
         }
 
-        .btn:hover {
-          filter: brightness(1.2);
-        }
-
-        .btn:active {
-          transform: scale(0.98);
-        }
+        .btn:hover { filter: brightness(1.2); }
+        .btn:active { transform: scale(0.98); }
 
         .btn-success { background: var(--btn-success-bg); border: 1px solid var(--btn-success-border); color: var(--btn-success-text); }
         .btn-danger  { background: var(--btn-danger-bg); border: 1px solid var(--btn-danger-border); color: var(--btn-danger-text); }
         .btn-action  { background: var(--btn-action-bg); border: 1px solid var(--btn-action-border); color: var(--btn-action-text); }
         .btn-neutral { background: var(--btn-neutral-bg); border: 1px solid var(--btn-neutral-border); color: var(--btn-neutral-text); }
         .btn-muted   { background: var(--btn-muted-bg); border: 1px solid var(--btn-muted-border); color: var(--btn-muted-text); }
-
-        button:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-          filter: none;
-        }
       </style>
 
       <ha-card>
@@ -197,13 +182,11 @@ class SipCallCard extends HTMLElement {
           <div class="timer-badge" id="timer-badge" style="display: none;">⏱️ 00:00</div>
         </div>
 
-        <!-- Botões de Chamada Recebida -->
         <div class="grid-buttons-incoming" id="grid-incoming" style="display: none;">
           <button class="btn btn-success" id="btn-answer">📞 Atender</button>
           <button class="btn btn-danger" id="btn-reject">📵 Recusar</button>
         </div>
 
-        <!-- Botões Em Chamada -->
         <div class="grid-buttons-incall" id="grid-incall" style="display: none;">
           <button class="btn btn-action" id="btn-gate">🔑 Abrir Portão</button>
           <button class="btn btn-neutral" id="btn-mute">🎙️ Mudo</button>
@@ -241,24 +224,25 @@ class SipCallCard extends HTMLElement {
   }
 
   _startRingtone() {
-    if (!this._ringtoneEl || !this._config.ringtone_url) return;
-    const targetUrl = new URL(this._config.ringtone_url, window.location.href).href;
-    
-    if (this._ringtoneEl.src !== targetUrl) {
+    if (!this._config.ringtone_url) return;
+    try {
+      const targetUrl = new URL(this._config.ringtone_url, window.location.href).href;
       this._ringtoneEl.src = targetUrl;
-    }
-
-    if (this._ringtoneEl.paused) {
       this._ringtoneEl.play().catch(err => {
-        console.debug("SIP Card: Autoplay de áudio do toque foi bloqueado pelo navegador:", err);
+        console.debug("SIP Card: Autoplay bloqueado pelo navegador:", err);
       });
+    } catch (e) {
+      console.error("SIP Card: Erro ao iniciar ringtone:", e);
     }
   }
 
   _stopRingtone() {
-    if (this._ringtoneEl && !this._ringtoneEl.paused) {
+    if (this._ringtoneEl) {
       this._ringtoneEl.pause();
       this._ringtoneEl.currentTime = 0;
+      // Libera completamente o recurso de áudio do hardware para o WebRTC
+      this._ringtoneEl.removeAttribute("src");
+      this._ringtoneEl.load();
     }
   }
 
@@ -267,7 +251,6 @@ class SipCallCard extends HTMLElement {
     try {
       return new URL(url, window.location.href).href;
     } catch (err) {
-      console.debug("SIP RX url normalization failed:", err);
       return url;
     }
   }
@@ -275,7 +258,6 @@ class SipCallCard extends HTMLElement {
   _bindRemoteAudio() {
     const nextUrl = this._normalizeAudioUrl(this._rxUrl);
     if (!nextUrl) return false;
-
     if (this._boundRxUrl === nextUrl) return false;
 
     this._el.audio.src = nextUrl;
@@ -302,9 +284,7 @@ class SipCallCard extends HTMLElement {
     const sec = Math.max(0, Math.floor(totalSeconds));
     const m = Math.floor(sec / 60);
     const s = sec % 60;
-    const mm = String(m).padStart(2, "0");
-    const ss = String(s).padStart(2, "0");
-    return `${mm}:${ss}`;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
   _startDurationTimer() {
@@ -332,13 +312,11 @@ class SipCallCard extends HTMLElement {
 
   _toggleMute() {
     this._isMuted = !this._isMuted;
-
     if (this._micStream) {
       this._micStream.getAudioTracks().forEach(track => {
         track.enabled = !this._isMuted;
       });
     }
-
     this._updateMuteUI();
   }
 
@@ -400,31 +378,34 @@ class SipCallCard extends HTMLElement {
     const isIncoming = sipState === "incoming";
     const isInCall   = sipState === "in_call";
 
-    // 1. Controle do Ringtone e Títulos
+    // Dispara troca de estado do áudio APENAS se o estado SIP mudou
+    if (this._lastSipState !== sipState) {
+      if (isIncoming) {
+        this._startRingtone();
+      } else {
+        this._stopRingtone();
+      }
+      this._lastSipState = sipState;
+    }
+
+    // Atualização de UI
     if (isIncoming) {
-      this._startRingtone();
       this._el.title.textContent = this._config.title_incoming;
       this._el.subtitle.textContent = "";
       this._el.timerBadge.style.display = "none";
+    } else if (isInCall) {
+      this._el.title.textContent = this._config.title_incall;
+      this._el.timerBadge.style.display = "block";
+      this._updateMuteUI();
     } else {
-      this._stopRingtone();
-
-      if (isInCall) {
-        this._el.title.textContent = this._config.title_incall;
-        this._el.timerBadge.style.display = "block";
-        this._updateMuteUI();
-      } else {
-        this._el.title.textContent = "🔒 Interfone";
-        this._el.subtitle.textContent = "";
-        this._el.timerBadge.style.display = "none";
-      }
+      this._el.title.textContent = "🔒 Interfone";
+      this._el.subtitle.textContent = "";
+      this._el.timerBadge.style.display = "none";
     }
 
-    // 2. Exibição das Grids de Botões
     this._el.gridIncoming.style.display = isIncoming ? "grid" : "none";
     this._el.gridInCall.style.display   = isInCall ? "grid" : "none";
 
-    // 3. Lógica de Parada
     if (!isInCall) {
       this._stopMic();
       this._stopListen();
@@ -432,7 +413,6 @@ class SipCallCard extends HTMLElement {
       this._isMuted = false;
     }
 
-    // 4. Lógica Em Chamada
     if (isInCall) {
       this._startDurationTimer();
       if (rxUrl) {
@@ -563,45 +543,7 @@ class SipCallCard extends HTMLElement {
     }
   }
 
-  getCardSize() {
-    return 2;
-  }
-
-  static getConfigElement() {
-    const el = document.createElement("div");
-    el.innerHTML = `
-      <style>
-        label { display: block; margin-bottom: 4px; font-weight: 500; }
-        input { width: 100%; padding: 6px; margin-bottom: 10px; box-sizing: border-box; }
-      </style>
-      <label>Entidade SIP (media_player):
-        <input id="entity" type="text" placeholder="media_player.sip_interfone" />
-      </label>
-      <label>Entidade do Portão (script, button, lock, switch):
-        <input id="gate_entity" type="text" placeholder="script.abrir_portao_do_interfone" />
-      </label>
-      <label>Caminho do Som da Chamada (Ringtone MP3):
-        <input id="ringtone_url" type="text" placeholder="/local/sounds/ringtone.mp3" />
-      </label>
-    `;
-    return el;
-  }
-
-  static getStubConfig() {
-    return { 
-      entity: "media_player.sip_interfone",
-      gate_entity: "script.abrir_portao_do_interfone",
-      ringtone_url: "/local/sounds/ringtone.mp3"
-    };
-  }
+  getCardSize() { return 2; }
 }
 
 customElements.define("sip-call-card", SipCallCard);
-
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "sip-call-card",
-  name: "SIP Call Card",
-  description: "Card moderno de interfone SIP com áudio, campainha, mudo e portão.",
-  preview: false,
-});

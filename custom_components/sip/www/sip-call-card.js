@@ -31,8 +31,6 @@ class SipCallCard extends HTMLElement {
     this._remoteAudioEl.playsInline = true;
     this._remoteAudioEl.preload = "none";
     this._remoteAudioEl.style.display = "none";
-
-    this._cameraEl = null;
   }
 
   setConfig(config) {
@@ -131,23 +129,6 @@ class SipCallCard extends HTMLElement {
           border: 1px solid var(--btn-success-border);
         }
 
-        /* Container de Vídeo */
-        .video-container {
-          width: 100%;
-          border-radius: 14px;
-          margin-bottom: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          overflow: hidden;
-          background: #000;
-        }
-
-        .video-container ::slotted(*),
-        .video-container ha-camera-stream {
-          width: 100%;
-          display: block;
-          border-radius: 14px;
-        }
-
         /* Grids de Botões */
         .grid-buttons-incoming {
           display: grid;
@@ -211,12 +192,6 @@ class SipCallCard extends HTMLElement {
           <div class="timer-badge" id="timer-badge" style="display: none;">⏱️ 00:00</div>
         </div>
 
-        <!-- Slot/Container para a Câmera WebRTC -->
-        <div class="video-container" id="video-container" style="display: none;">
-          <slot name="camera"></slot>
-          <div id="camera-mount"></div>
-        </div>
-
         <!-- Botões de Chamada Recebida -->
         <div class="grid-buttons-incoming" id="grid-incoming" style="display: none;">
           <button class="btn btn-success" id="btn-answer">📞 Atender</button>
@@ -240,19 +215,17 @@ class SipCallCard extends HTMLElement {
     }
 
     this._el = {
-      title:          this.shadowRoot.getElementById("card-title"),
-      subtitle:       this.shadowRoot.getElementById("card-subtitle"),
-      timerBadge:     this.shadowRoot.getElementById("timer-badge"),
-      videoContainer: this.shadowRoot.getElementById("video-container"),
-      cameraMount:    this.shadowRoot.getElementById("camera-mount"),
-      gridIncoming:   this.shadowRoot.getElementById("grid-incoming"),
-      gridInCall:     this.shadowRoot.getElementById("grid-incall"),
-      btnAnswer:      this.shadowRoot.getElementById("btn-answer"),
-      btnReject:      this.shadowRoot.getElementById("btn-reject"),
-      btnHangup:      this.shadowRoot.getElementById("btn-hangup"),
-      btnMute:        this.shadowRoot.getElementById("btn-mute"),
-      btnGate:        this.shadowRoot.getElementById("btn-gate"),
-      audio:          this._remoteAudioEl,
+      title:        this.shadowRoot.getElementById("card-title"),
+      subtitle:     this.shadowRoot.getElementById("card-subtitle"),
+      timerBadge:   this.shadowRoot.getElementById("timer-badge"),
+      gridIncoming: this.shadowRoot.getElementById("grid-incoming"),
+      gridInCall:   this.shadowRoot.getElementById("grid-incall"),
+      btnAnswer:    this.shadowRoot.getElementById("btn-answer"),
+      btnReject:    this.shadowRoot.getElementById("btn-reject"),
+      btnHangup:    this.shadowRoot.getElementById("btn-hangup"),
+      btnMute:      this.shadowRoot.getElementById("btn-mute"),
+      btnGate:      this.shadowRoot.getElementById("btn-gate"),
+      audio:        this._remoteAudioEl,
     };
 
     this._el.btnAnswer.addEventListener("click", () => this._answer());
@@ -382,23 +355,6 @@ class SipCallCard extends HTMLElement {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  _updateCamera() {
-    if (!this._config.camera_entity || !this._hass) {
-      this._el.videoContainer.style.display = "none";
-      return;
-    }
-
-    this._el.videoContainer.style.display = "block";
-
-    if (!this._cameraEl) {
-      this._cameraEl = document.createElement("ha-camera-stream");
-      this._el.cameraMount.replaceChildren(this._cameraEl);
-    }
-
-    this._cameraEl.hass = this._hass;
-    this._cameraEl.stateObj = this._hass.states[this._config.camera_entity];
-  }
-
   _updateState() {
     if (!this._hass || !this._config) return;
     const stateObj = this._hass.states[this._config.entity];
@@ -408,7 +364,6 @@ class SipCallCard extends HTMLElement {
     }
 
     const sipState = (stateObj.attributes.sip_state || "").toLowerCase();
-    const haState  = stateObj.state;
     const rxUrl    = stateObj.attributes.rx_stream_url || null;
     const txUrl    = stateObj.attributes.tx_audio_url  || null;
 
@@ -433,18 +388,11 @@ class SipCallCard extends HTMLElement {
       this._el.timerBadge.style.display = "none";
     }
 
-    // 2. Exibição das Grids
+    // 2. Exibição das Grids de Botões
     this._el.gridIncoming.style.display = isIncoming ? "grid" : "none";
     this._el.gridInCall.style.display   = isInCall ? "grid" : "none";
 
-    // 3. Atualizar Câmera
-    if (isIncoming || isInCall) {
-      this._updateCamera();
-    } else {
-      this._el.videoContainer.style.display = "none";
-    }
-
-    // 4. Lógica de Parada
+    // 3. Lógica de Parada
     if (!isInCall) {
       this._stopMic();
       this._stopListen();
@@ -452,7 +400,7 @@ class SipCallCard extends HTMLElement {
       this._isMuted = false;
     }
 
-    // 5. Lógica Em Chamada
+    // 4. Lógica Em Chamada
     if (isInCall) {
       this._startDurationTimer();
       if (rxUrl) {
@@ -583,7 +531,7 @@ class SipCallCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 3;
+    return 2;
   }
 
   static getConfigElement() {
@@ -596,11 +544,8 @@ class SipCallCard extends HTMLElement {
       <label>Entidade SIP (media_player):
         <input id="entity" type="text" placeholder="media_player.sip_interfone" />
       </label>
-      <label>Entidade do Portão (button, lock, switch):
-        <input id="gate_entity" type="text" placeholder="button.abrir_portao" />
-      </label>
-      <label>Entidade da Câmera (opcional):
-        <input id="camera_entity" type="text" placeholder="camera.portao" />
+      <label>Entidade do Portão (script, button, lock, switch):
+        <input id="gate_entity" type="text" placeholder="script.abrir_portao_do_interfone" />
       </label>
     `;
     return el;
@@ -608,9 +553,8 @@ class SipCallCard extends HTMLElement {
 
   static getStubConfig() {
     return { 
-      entity: "media_player.phone_line",
-      gate_entity: "button.abrir_portao",
-      camera_entity: "camera.portao"
+      entity: "media_player.sip_interfone",
+      gate_entity: "script.abrir_portao_do_interfone"
     };
   }
 }
@@ -621,6 +565,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "sip-call-card",
   name: "SIP Call Card",
-  description: "Card moderno de interfone SIP com suporte a áudio, vídeo e abertura de portão.",
+  description: "Card moderno de interfone SIP com suporte a áudio bidirecional e abertura de portão.",
   preview: false,
 });

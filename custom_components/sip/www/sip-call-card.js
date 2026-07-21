@@ -31,6 +31,10 @@ class SipCallCard extends HTMLElement {
     this._remoteAudioEl.playsInline = true;
     this._remoteAudioEl.preload = "none";
     this._remoteAudioEl.style.display = "none";
+
+    // Áudio do toque de chamada (Ringtone)
+    this._ringtoneEl = new Audio();
+    this._ringtoneEl.loop = true;
   }
 
   setConfig(config) {
@@ -40,6 +44,7 @@ class SipCallCard extends HTMLElement {
     this._config = {
       title_incoming: "🔔 Chamando...",
       title_incall: "🔴 Em andamento...",
+      ringtone_url: "/local/sounds/ringtone.mp3",
       ...config
     };
     this._render();
@@ -235,6 +240,28 @@ class SipCallCard extends HTMLElement {
     this._el.btnGate.addEventListener("click", () => this._openGate());
   }
 
+  _startRingtone() {
+    if (!this._ringtoneEl || !this._config.ringtone_url) return;
+    const targetUrl = new URL(this._config.ringtone_url, window.location.href).href;
+    
+    if (this._ringtoneEl.src !== targetUrl) {
+      this._ringtoneEl.src = targetUrl;
+    }
+
+    if (this._ringtoneEl.paused) {
+      this._ringtoneEl.play().catch(err => {
+        console.debug("SIP Card: Autoplay de áudio do toque foi bloqueado pelo navegador:", err);
+      });
+    }
+  }
+
+  _stopRingtone() {
+    if (this._ringtoneEl && !this._ringtoneEl.paused) {
+      this._ringtoneEl.pause();
+      this._ringtoneEl.currentTime = 0;
+    }
+  }
+
   _normalizeAudioUrl(url) {
     if (!url) return null;
     try {
@@ -373,19 +400,24 @@ class SipCallCard extends HTMLElement {
     const isIncoming = sipState === "incoming";
     const isInCall   = sipState === "in_call";
 
-    // 1. Atualizar Títulos e Subtítulos
+    // 1. Controle do Ringtone e Títulos
     if (isIncoming) {
+      this._startRingtone();
       this._el.title.textContent = this._config.title_incoming;
       this._el.subtitle.textContent = "";
       this._el.timerBadge.style.display = "none";
-    } else if (isInCall) {
-      this._el.title.textContent = this._config.title_incall;
-      this._el.timerBadge.style.display = "block";
-      this._updateMuteUI();
     } else {
-      this._el.title.textContent = "🔒 Interfone";
-      this._el.subtitle.textContent = "";
-      this._el.timerBadge.style.display = "none";
+      this._stopRingtone();
+
+      if (isInCall) {
+        this._el.title.textContent = this._config.title_incall;
+        this._el.timerBadge.style.display = "block";
+        this._updateMuteUI();
+      } else {
+        this._el.title.textContent = "🔒 Interfone";
+        this._el.subtitle.textContent = "";
+        this._el.timerBadge.style.display = "none";
+      }
     }
 
     // 2. Exibição das Grids de Botões
@@ -418,6 +450,7 @@ class SipCallCard extends HTMLElement {
 
   async _answer() {
     if (!this._hass) return;
+    this._stopRingtone();
     try {
       await this._hass.callService("sip", "answer", {}, { entity_id: this._config.entity });
       await this._sleep(150);
@@ -437,6 +470,7 @@ class SipCallCard extends HTMLElement {
 
   async _hangup() {
     if (!this._hass) return;
+    this._stopRingtone();
     this._stopMic();
     this._stopListen();
     this._stopDurationTimer(true);
@@ -465,7 +499,6 @@ class SipCallCard extends HTMLElement {
     this._micActive = true;
     this._micFirstChunk = true;
 
-    // Respeita o estado de Mudo caso já estivesse mutado
     this._micStream.getAudioTracks().forEach(track => {
       track.enabled = !this._isMuted;
     });
@@ -547,6 +580,9 @@ class SipCallCard extends HTMLElement {
       <label>Entidade do Portão (script, button, lock, switch):
         <input id="gate_entity" type="text" placeholder="script.abrir_portao_do_interfone" />
       </label>
+      <label>Caminho do Som da Chamada (Ringtone MP3):
+        <input id="ringtone_url" type="text" placeholder="/local/sounds/ringtone.mp3" />
+      </label>
     `;
     return el;
   }
@@ -554,7 +590,8 @@ class SipCallCard extends HTMLElement {
   static getStubConfig() {
     return { 
       entity: "media_player.sip_interfone",
-      gate_entity: "script.abrir_portao_do_interfone"
+      gate_entity: "script.abrir_portao_do_interfone",
+      ringtone_url: "/local/sounds/ringtone.mp3"
     };
   }
 }
@@ -565,6 +602,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "sip-call-card",
   name: "SIP Call Card",
-  description: "Card moderno de interfone SIP com suporte a áudio bidirecional e abertura de portão.",
+  description: "Card moderno de interfone SIP com áudio, campainha, mudo e portão.",
   preview: false,
 });

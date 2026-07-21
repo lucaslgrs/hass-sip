@@ -46,6 +46,13 @@ class SipCallCard extends HTMLElement {
     this._txUrl = null;
     this._rxUrl = null;
     this._entryId = null;
+    this._listenStarting = false;
+    this._boundRxUrl = null;
+    this._remoteAudioEl = document.createElement("audio");
+    this._remoteAudioEl.controls = true;
+    this._remoteAudioEl.playsInline = true;
+    this._remoteAudioEl.preload = "none";
+    this._remoteAudioEl.style.display = "none";
   }
 
   setConfig(config) {
@@ -131,10 +138,15 @@ class SipCallCard extends HTMLElement {
           <button class="btn-listen" id="btn-listen" disabled>🔊 Listen</button>
           <button class="btn-mic" id="btn-mic" disabled>🎤 Mic On</button>
         </div>
-        <audio id="rx-audio" controls></audio>
+        <div id="rx-audio-slot"></div>
         <div class="stream-note" id="stream-note"></div>
       </ha-card>
     `;
+
+    const audioSlot = this.shadowRoot.getElementById("rx-audio-slot");
+    if (audioSlot && this._remoteAudioEl.parentNode !== audioSlot) {
+      audioSlot.replaceChildren(this._remoteAudioEl);
+    }
 
     this._el = {
       title:     this.shadowRoot.getElementById("card-title"),
@@ -144,7 +156,7 @@ class SipCallCard extends HTMLElement {
       btnHangup: this.shadowRoot.getElementById("btn-hangup"),
       btnListen: this.shadowRoot.getElementById("btn-listen"),
       btnMic:    this.shadowRoot.getElementById("btn-mic"),
-      audio:     this.shadowRoot.getElementById("rx-audio"),
+      audio:     this._remoteAudioEl,
       note:      this.shadowRoot.getElementById("stream-note"),
     };
 
@@ -152,6 +164,51 @@ class SipCallCard extends HTMLElement {
     this._el.btnHangup.addEventListener("click", () => this._hangup());
     this._el.btnListen.addEventListener("click", () => this._startListen());
     this._el.btnMic.addEventListener("click", () => this._toggleMic());
+  }
+
+  _normalizeAudioUrl(url) {
+    if (!url) return null;
+    try {
+      return new URL(url, window.location.href).href;
+    } catch (err) {
+      console.debug("SIP RX url normalization failed:", err);
+      return url;
+    }
+  }
+
+  _bindRemoteAudio() {
+    const nextUrl = this._normalizeAudioUrl(this._rxUrl);
+    if (!nextUrl) return false;
+
+    if (this._boundRxUrl === nextUrl) {
+      console.debug("SIP RX bind skipped: audio source already bound.", nextUrl);
+      return false;
+    }
+
+    console.debug("SIP RX binding audio source.", {
+      previous: this._boundRxUrl,
+      next: nextUrl,
+    });
+    this._el.audio.src = this._rxUrl;
+    this._boundRxUrl = nextUrl;
+    return true;
+  }
+
+  _stopListen() {
+    const audio = this._el?.audio || this._remoteAudioEl;
+    if (!audio) return;
+
+    if (!audio.paused) {
+      console.debug("SIP RX pausing remote audio.");
+      audio.pause();
+    }
+    if (audio.getAttribute("src")) {
+      console.debug("SIP RX clearing audio source.", this._boundRxUrl);
+      audio.removeAttribute("src");
+    }
+    audio.style.display = "none";
+    this._boundRxUrl = null;
+    this._listenStarting = false;
   }
 
   _updateState() {
@@ -201,19 +258,10 @@ class SipCallCard extends HTMLElement {
     this._el.btnListen.disabled = !(isInCall && rxUrl);
     this._el.btnMic.disabled    = !isInCall;
 
-    // If we have an rxUrl and audio isn't playing this stream yet, wire it up
-    if (rxUrl && this._el.audio.src !== rxUrl) {
-      // Don't auto-switch src if mic is active (race condition risk)
-      if (!this._micActive) {
-        this._el.audio.src = rxUrl;
-      }
-    }
-
     // If the call ended, stop mic and hide audio
     if (!isInCall) {
       this._stopMic();
-      this._el.audio.style.display = "none";
-      this._el.audio.src = "";
+      this._stopListen();
       this._el.note.textContent = "";
     }
 
@@ -234,6 +282,7 @@ class SipCallCard extends HTMLElement {
   async _hangup() {
     if (!this._hass) return;
     this._stopMic();
+    this._stopListen();
     try {
       await this._hass.callService("sip", "hangup", {}, { entity_id: this._config.entity });
     } catch (e) {
@@ -241,19 +290,41 @@ class SipCallCard extends HTMLElement {
     }
   }
 
-  _startListen() {
+  async _startListen() {
     const audio = this._el.audio;
     if (!this._rxUrl) return;
+    if (this._listenStarting) {
+      console.debug("SIP RX play skipped: listen start already in progress.");
+      return;
+    }
+
+    this._listenStarting = true;
+
     // The rx_stream_url exposed by the entity is already a signed path —
     // use it verbatim.  Do NOT append any token query parameters here;
     // the <audio> element cannot send an Authorization header and HA's
     // HTTP auth middleware only accepts signed paths (not a raw token= param).
-    audio.src = this._rxUrl;
-    audio.style.display = "block";
-    audio.play().catch(err => {
-      console.warn("SIP RX autoplay blocked:", err);
+    try {
+      this._bindRemoteAudio();
+      audio.style.display = "block";
+      console.debug("SIP RX play attempt.", {
+        paused: audio.paused,
+        src: this._boundRxUrl,
+      });
+
+      if (audio.paused) {
+        await audio.play();
+        console.debug("SIP RX play started.", this._boundRxUrl);
+      } else {
+        console.debug("SIP RX play skipped: audio already playing.");
+      }
+      this._el.note.textContent = "Listening to caller audio.";
+    } catch (err) {
+      console.warn("SIP RX play failed:", err);
       this._el.note.textContent = "Tap the audio player to start listening.";
-    });
+    } finally {
+      this._listenStarting = false;
+    }
   }
 
   async _toggleMic() {

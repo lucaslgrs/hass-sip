@@ -6,6 +6,7 @@
  *  - Mute/Unmute microphone control
  *  - Call duration timer
  *  - WebRTC-friendly ringtone audio management
+ *  - Native HA fetchWithAuth integration to avoid HTTP ban logs
  */
 
 class SipCallCard extends HTMLElement {
@@ -64,6 +65,7 @@ class SipCallCard extends HTMLElement {
           --text-primary: #f3f4f6;
           --text-secondary: #9ca3af;
           
+          /* Cores Modernas Suaves (Tinted Glass) */
           --btn-success-bg: rgba(46, 125, 50, 0.22);
           --btn-success-border: rgba(76, 175, 80, 0.35);
           --btn-success-text: #81c784;
@@ -513,20 +515,27 @@ class SipCallCard extends HTMLElement {
       if (!event.data || event.data.size === 0) return;
       if (!this._micActive) return;
 
-      const headers = { "Content-Type": mimeType || "audio/webm" };
-      const freshToken = this._hass?.auth?.data?.access_token;
-      if (freshToken) headers["Authorization"] = "Bearer " + freshToken;
+      const isFirst = this._micFirstChunk;
+      this._micFirstChunk = false;
+      const url = isFirst ? txUrl + "?action=start" : txUrl;
+
+      const fetchOptions = {
+        method: "POST",
+        headers: { "Content-Type": mimeType || "audio/webm" },
+        credentials: "same-origin",
+        body: event.data,
+      };
 
       try {
-        const isFirst = this._micFirstChunk;
-        this._micFirstChunk = false;
-        const url = isFirst ? txUrl + "?action=start" : txUrl;
-        await fetch(url, {
-          method: "POST",
-          headers,
-          credentials: "same-origin",
-          body: event.data,
-        });
+        if (this._hass?.fetchWithAuth) {
+          await this._hass.fetchWithAuth(url, fetchOptions);
+        } else {
+          const token = this._hass?.auth?.accessToken || this._hass?.auth?.data?.access_token;
+          if (token) {
+            fetchOptions.headers["Authorization"] = "Bearer " + token;
+            await fetch(url, fetchOptions);
+          }
+        }
       } catch (err) {
         console.debug("SIP TX audio send error:", err);
       }
@@ -548,15 +557,59 @@ class SipCallCard extends HTMLElement {
     this._micActive = false;
     this._micFirstChunk = false;
 
-    if (this._txUrl) {
-      const token = this._hass?.auth?.data?.access_token;
-      const headers = {};
-      if (token) headers["Authorization"] = "Bearer " + token;
-      fetch(this._txUrl + "?action=stop", { method: "POST", headers, credentials: "same-origin" }).catch(() => {});
+    if (this._txUrl && this._hass) {
+      const stopUrl = this._txUrl + "?action=stop";
+      const fetchOptions = { method: "POST", credentials: "same-origin" };
+
+      if (this._hass.fetchWithAuth) {
+        this._hass.fetchWithAuth(stopUrl, fetchOptions).catch(() => {});
+      } else {
+        const token = this._hass?.auth?.accessToken || this._hass?.auth?.data?.access_token;
+        if (token) {
+          fetchOptions.headers = { "Authorization": "Bearer " + token };
+          fetch(stopUrl, fetchOptions).catch(() => {});
+        }
+      }
     }
   }
 
   getCardSize() { return 2; }
+
+  static getConfigElement() {
+    const el = document.createElement("div");
+    el.innerHTML = `
+      <style>
+        label { display: block; margin-bottom: 4px; font-weight: 500; }
+        input { width: 100%; padding: 6px; margin-bottom: 10px; box-sizing: border-box; }
+      </style>
+      <label>Entidade SIP (media_player):
+        <input id="entity" type="text" placeholder="media_player.sip_interfone" />
+      </label>
+      <label>Entidade do Portão (script, button, lock, switch):
+        <input id="gate_entity" type="text" placeholder="script.abrir_portao_do_interfone" />
+      </label>
+      <label>Caminho do Som da Chamada (Ringtone MP3):
+        <input id="ringtone_url" type="text" placeholder="/local/sounds/ringtone.mp3" />
+      </label>
+    `;
+    return el;
+  }
+
+  static getStubConfig() {
+    return { 
+      entity: "media_player.sip_interfone",
+      gate_entity: "script.abrir_portao_do_interfone",
+      ringtone_url: "/local/sounds/ringtone.mp3"
+    };
+  }
 }
 
 customElements.define("sip-call-card", SipCallCard);
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "sip-call-card",
+  name: "SIP Call Card",
+  description: "Card moderno de interfone SIP com áudio, campainha, mudo e portão.",
+  preview: false,
+});

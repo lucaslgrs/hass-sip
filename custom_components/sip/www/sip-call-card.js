@@ -1,17 +1,11 @@
 /**
- * sip-call-card.js — Custom Lovelace card for hass-sip two-way browser audio.
- *
- * Test-mode variant
- * -----------------
- * • Answer triggers mic capture automatically.
- * • "Mic On" and "Listen" buttons are hidden for simplified testing.
- * • Caller field is removed from UI.
- * • Adds in-call duration timer that starts when call enters in_call state.
- */
-
-/**
- * sip-call-card.js — Custom Lovelace card for hass-sip with modern UI,
- * mute functionality, duration timer, gate script integration, and WebRTC-friendly ringtone audio.
+ * sip-call-card.js — Custom Lovelace card for hass-sip
+ * Feature Set:
+ *  - Dynamic UI (Incoming / In-Call / Idle)
+ *  - Gate Script Integration with Visual Alert Feedback
+ *  - Mute/Unmute microphone control
+ *  - Call duration timer
+ *  - WebRTC-friendly ringtone audio management
  */
 
 class SipCallCard extends HTMLElement {
@@ -27,7 +21,7 @@ class SipCallCard extends HTMLElement {
     this._rxUrl = null;
     this._listenStarting = false;
     this._boundRxUrl = null;
-    this._lastSipState = null; // Trava para evitar chamadas repetidas no set hass
+    this._lastSipState = null;
 
     this._callStartedAtMs = null;
     this._durationTimer = null;
@@ -38,7 +32,6 @@ class SipCallCard extends HTMLElement {
     this._remoteAudioEl.preload = "none";
     this._remoteAudioEl.style.display = "none";
 
-    // Elemento de áudio do toque
     this._ringtoneEl = new Audio();
     this._ringtoneEl.loop = true;
   }
@@ -66,13 +59,11 @@ class SipCallCard extends HTMLElement {
       <style>
         :host {
           display: block;
-          --bg-color: #111113;
           --card-bg: #1c1c1e;
           --card-border: rgba(255, 255, 255, 0.08);
           --text-primary: #f3f4f6;
           --text-secondary: #9ca3af;
           
-          /* Cores Modernas Suaves (Tinted Glass) */
           --btn-success-bg: rgba(46, 125, 50, 0.22);
           --btn-success-border: rgba(76, 175, 80, 0.35);
           --btn-success-text: #81c784;
@@ -144,9 +135,7 @@ class SipCallCard extends HTMLElement {
           gap: 10px;
         }
 
-        .btn-full {
-          grid-column: span 2;
-        }
+        .btn-full { grid-column: span 2; }
 
         .btn {
           display: inline-flex;
@@ -240,7 +229,6 @@ class SipCallCard extends HTMLElement {
     if (this._ringtoneEl) {
       this._ringtoneEl.pause();
       this._ringtoneEl.currentTime = 0;
-      // Libera completamente o recurso de áudio do hardware para o WebRTC
       this._ringtoneEl.removeAttribute("src");
       this._ringtoneEl.load();
     }
@@ -335,6 +323,12 @@ class SipCallCard extends HTMLElement {
   async _openGate() {
     if (!this._hass || !this._config.gate_entity) return;
 
+    const btn = this._el.btnGate;
+    if (!btn) return;
+
+    const originalText = "🔑 Abrir Portão";
+    const originalClass = btn.className;
+
     const entity = this._config.gate_entity;
     let domain = entity.split(".")[0];
     let service = "turn_on";
@@ -350,9 +344,30 @@ class SipCallCard extends HTMLElement {
     }
 
     try {
+      btn.textContent = "🔓 Abrindo...";
+      btn.style.pointerEvents = "none";
+      btn.style.opacity = "0.8";
+
       await this._hass.callService(domain, service, { entity_id: entity });
+
+      btn.textContent = "✅ Portão Aberto!";
+      btn.className = "btn btn-success";
+      btn.style.opacity = "1";
+
     } catch (err) {
       console.error("SIP Card: Error opening gate", err);
+      btn.textContent = "❌ Erro ao Abrir";
+      btn.className = "btn btn-danger";
+      btn.style.opacity = "1";
+    } finally {
+      setTimeout(() => {
+        if (btn) {
+          btn.textContent = originalText;
+          btn.className = originalClass;
+          btn.style.pointerEvents = "auto";
+          btn.style.opacity = "1";
+        }
+      }, 2500);
     }
   }
 
@@ -378,7 +393,6 @@ class SipCallCard extends HTMLElement {
     const isIncoming = sipState === "incoming";
     const isInCall   = sipState === "in_call";
 
-    // Dispara troca de estado do áudio APENAS se o estado SIP mudou
     if (this._lastSipState !== sipState) {
       if (isIncoming) {
         this._startRingtone();
@@ -388,7 +402,6 @@ class SipCallCard extends HTMLElement {
       this._lastSipState = sipState;
     }
 
-    // Atualização de UI
     if (isIncoming) {
       this._el.title.textContent = this._config.title_incoming;
       this._el.subtitle.textContent = "";

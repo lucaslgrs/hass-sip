@@ -308,6 +308,14 @@ class SipCallCard extends HTMLElement {
     // the <audio> element cannot send an Authorization header and HA's
     // HTTP auth middleware only accepts signed paths (not a raw token= param).
     try {
+      const nextUrl = this._normalizeAudioUrl(this._rxUrl);
+      const currentUrl = this._normalizeAudioUrl(audio.src);
+      if (nextUrl && currentUrl === nextUrl && !audio.paused && !audio.ended) {
+        console.debug("SIP RX play skipped: already playing current stream.", nextUrl);
+        this._el.note.textContent = "Listening to caller audio.";
+        return;
+      }
+
       this._bindRemoteAudio();
       audio.style.display = "block";
       console.debug("SIP RX play attempt.", {
@@ -323,7 +331,20 @@ class SipCallCard extends HTMLElement {
       }
       this._el.note.textContent = "Listening to caller audio.";
     } catch (err) {
-      console.warn("SIP RX play failed:", err);
+      if (err && err.name === "AbortError") {
+        console.warn("SIP RX play interrupted; retrying once...", err);
+        try {
+          await new Promise(r => setTimeout(r, 120));
+          if (audio.paused) await audio.play();
+          console.debug("SIP RX play retry started.", this._boundRxUrl);
+          this._el.note.textContent = "Listening to caller audio.";
+          return;
+        } catch (retryErr) {
+          console.warn("SIP RX play retry failed:", retryErr);
+        }
+      } else {
+        console.warn("SIP RX play failed:", err);
+      }
       this._el.note.textContent = "Tap the audio player to start listening.";
     } finally {
       this._listenStarting = false;
@@ -374,7 +395,6 @@ class SipCallCard extends HTMLElement {
     const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
     this._mediaRecorder = recorder;
 
-    const token = this._hass?.auth?.data?.access_token;
     const txUrl = this._txUrl;
 
     recorder.ondataavailable = async (event) => {
@@ -382,7 +402,8 @@ class SipCallCard extends HTMLElement {
       if (!this._micActive) return;
 
       const headers = { "Content-Type": mimeType || "audio/webm" };
-      if (token) headers["Authorization"] = "Bearer " + token;
+      const freshToken = this._hass?.auth?.data?.access_token;
+      if (freshToken) headers["Authorization"] = "Bearer " + freshToken;
 
       try {
         // The first chunk contains the full container/codec header (EBML for WebM,
@@ -395,6 +416,7 @@ class SipCallCard extends HTMLElement {
         await fetch(url, {
           method: "POST",
           headers,
+          credentials: "same-origin",
           body: event.data,
         });
       } catch (err) {
@@ -426,7 +448,7 @@ class SipCallCard extends HTMLElement {
       const token = this._hass?.auth?.data?.access_token;
       const headers = {};
       if (token) headers["Authorization"] = "Bearer " + token;
-      fetch(this._txUrl + "?action=stop", { method: "POST", headers }).catch(() => {});
+      fetch(this._txUrl + "?action=stop", { method: "POST", headers, credentials: "same-origin" }).catch(() => {});
     }
   }
 

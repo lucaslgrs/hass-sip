@@ -17,6 +17,7 @@ class SipCallCard extends HTMLElement {
     this._micStream = null;
     this._micActive = false;
     this._micFirstChunk = false;
+    this._isMuted = false;
     this._txUrl = null;
     this._rxUrl = null;
     this._listenStarting = false;
@@ -30,13 +31,19 @@ class SipCallCard extends HTMLElement {
     this._remoteAudioEl.playsInline = true;
     this._remoteAudioEl.preload = "none";
     this._remoteAudioEl.style.display = "none";
+
+    this._cameraEl = null;
   }
 
   setConfig(config) {
     if (!config.entity) {
       throw new Error("sip-call-card: 'entity' is required");
     }
-    this._config = config;
+    this._config = {
+      title_incoming: "🔔 Chamando...",
+      title_incall: "🔴 Em andamento...",
+      ...config
+    };
     this._render();
   }
 
@@ -48,70 +55,182 @@ class SipCallCard extends HTMLElement {
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; }
+        :host {
+          display: block;
+          --bg-color: #111113;
+          --card-bg: #1c1c1e;
+          --card-border: rgba(255, 255, 255, 0.08);
+          --text-primary: #f3f4f6;
+          --text-secondary: #9ca3af;
+          
+          /* Cores Modernas Suaves (Tinted Glass) */
+          --btn-success-bg: rgba(46, 125, 50, 0.22);
+          --btn-success-border: rgba(76, 175, 80, 0.35);
+          --btn-success-text: #81c784;
+
+          --btn-danger-bg: rgba(211, 47, 47, 0.2);
+          --btn-danger-border: rgba(239, 83, 80, 0.3);
+          --btn-danger-text: #e57373;
+
+          --btn-action-bg: rgba(2, 136, 209, 0.2);
+          --btn-action-border: rgba(41, 182, 246, 0.3);
+          --btn-action-text: #64b5f6;
+
+          --btn-neutral-bg: rgba(255, 255, 255, 0.05);
+          --btn-neutral-border: rgba(255, 255, 255, 0.1);
+          --btn-neutral-text: #e5e7eb;
+
+          --btn-muted-bg: rgba(245, 124, 0, 0.2);
+          --btn-muted-border: rgba(255, 167, 38, 0.35);
+          --btn-muted-text: #ffb74d;
+
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
         ha-card {
-          padding: 16px;
-          font-family: var(--paper-font-body1_-_font-family, sans-serif);
+          background: var(--card-bg);
+          border: 1px solid var(--card-border);
+          border-radius: 18px;
+          padding: 18px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+          color: var(--text-primary);
         }
-        .title {
-          font-size: 1.1em;
-          font-weight: 500;
-          margin-bottom: 8px;
-        }
-        .state-badge {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 12px;
-          font-size: 0.85em;
-          font-weight: 600;
-          margin-bottom: 8px;
-          background: var(--primary-color, #03a9f4);
-          color: #fff;
-        }
-        .state-badge.idle { background: var(--disabled-color, #9e9e9e); }
-        .state-badge.incoming { background: var(--warning-color, #ff9800); }
-        .state-badge.in_call { background: var(--success-color, #4caf50); }
-        .duration {
-          font-size: 0.95em;
-          color: var(--secondary-text-color, #888);
-          margin-bottom: 12px;
-          min-height: 1.2em;
-        }
-        .controls {
+
+        /* Header */
+        .card-header {
           display: flex;
-          flex-wrap: wrap;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 14px;
+          min-height: 32px;
+        }
+
+        .card-title {
+          font-weight: 600;
+          font-size: 1.05rem;
+          display: flex;
+          align-items: center;
           gap: 8px;
-          margin-bottom: 12px;
+          color: var(--text-primary);
         }
-        button {
-          padding: 8px 14px;
-          border: none;
-          border-radius: 4px;
+
+        .subtitle {
+          font-size: 0.78rem;
+          color: var(--text-secondary);
+          margin-top: 2px;
+        }
+
+        /* Timer Badge */
+        .timer-badge {
+          font-size: 0.78rem;
+          font-weight: 600;
+          padding: 4px 10px;
+          border-radius: 20px;
+          background: var(--btn-success-bg);
+          color: var(--btn-success-text);
+          border: 1px solid var(--btn-success-border);
+        }
+
+        /* Container de Vídeo */
+        .video-container {
+          width: 100%;
+          border-radius: 14px;
+          margin-bottom: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          overflow: hidden;
+          background: #000;
+        }
+
+        .video-container ::slotted(*),
+        .video-container ha-camera-stream {
+          width: 100%;
+          display: block;
+          border-radius: 14px;
+        }
+
+        /* Grids de Botões */
+        .grid-buttons-incoming {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+
+        .grid-buttons-incall {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+
+        .btn-full {
+          grid-column: span 2;
+        }
+
+        /* Estilo dos Botões */
+        .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px 14px;
+          border-radius: 12px;
+          font-size: 0.88rem;
+          font-weight: 600;
           cursor: pointer;
-          font-size: 0.9em;
-          font-weight: 500;
-          transition: background 0.15s;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          border: none;
+          outline: none;
         }
-        .btn-answer  { background: var(--success-color, #4caf50); color: #fff; }
-        .btn-hangup  { background: var(--error-color, #f44336); color: #fff; }
-        button:disabled { opacity: 0.4; cursor: default; }
-        audio { width: 100%; margin-top: 4px; display: none; }
-        .stream-note {
-          font-size: 0.8em;
-          color: var(--secondary-text-color, #888);
-          margin-top: 8px;
+
+        .btn:hover {
+          filter: brightness(1.2);
+        }
+
+        .btn:active {
+          transform: scale(0.98);
+        }
+
+        .btn-success { background: var(--btn-success-bg); border: 1px solid var(--btn-success-border); color: var(--btn-success-text); }
+        .btn-danger  { background: var(--btn-danger-bg); border: 1px solid var(--btn-danger-border); color: var(--btn-danger-text); }
+        .btn-action  { background: var(--btn-action-bg); border: 1px solid var(--btn-action-border); color: var(--btn-action-text); }
+        .btn-neutral { background: var(--btn-neutral-bg); border: 1px solid var(--btn-neutral-border); color: var(--btn-neutral-text); }
+        .btn-muted   { background: var(--btn-muted-bg); border: 1px solid var(--btn-muted-border); color: var(--btn-muted-text); }
+
+        button:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+          filter: none;
         }
       </style>
+
       <ha-card>
-        <div class="title" id="card-title">SIP Phone</div>
-        <div class="state-badge idle" id="state-badge">Idle</div>
-        <div class="duration" id="call-duration"></div>
-        <div class="controls" id="controls">
-          <button class="btn-answer" id="btn-answer" disabled>📞 Answer</button>
-          <button class="btn-hangup" id="btn-hangup" disabled>📵 Hang Up</button>
+        <div class="card-header">
+          <div>
+            <div class="card-title" id="card-title">🔔 Chamando...</div>
+            <div class="subtitle" id="card-subtitle"></div>
+          </div>
+          <div class="timer-badge" id="timer-badge" style="display: none;">⏱️ 00:00</div>
         </div>
+
+        <!-- Slot/Container para a Câmera WebRTC -->
+        <div class="video-container" id="video-container" style="display: none;">
+          <slot name="camera"></slot>
+          <div id="camera-mount"></div>
+        </div>
+
+        <!-- Botões de Chamada Recebida -->
+        <div class="grid-buttons-incoming" id="grid-incoming" style="display: none;">
+          <button class="btn btn-success" id="btn-answer">📞 Atender</button>
+          <button class="btn btn-danger" id="btn-reject">📵 Recusar</button>
+        </div>
+
+        <!-- Botões Em Chamada -->
+        <div class="grid-buttons-incall" id="grid-incall" style="display: none;">
+          <button class="btn btn-action" id="btn-gate">🔑 Abrir Portão</button>
+          <button class="btn btn-neutral" id="btn-mute">🎙️ Mudo</button>
+          <button class="btn btn-danger btn-full" id="btn-hangup">📵 Desligar</button>
+        </div>
+
         <div id="rx-audio-slot"></div>
-        <div class="stream-note" id="stream-note"></div>
       </ha-card>
     `;
 
@@ -121,17 +240,26 @@ class SipCallCard extends HTMLElement {
     }
 
     this._el = {
-      title:        this.shadowRoot.getElementById("card-title"),
-      badge:        this.shadowRoot.getElementById("state-badge"),
-      duration:     this.shadowRoot.getElementById("call-duration"),
-      btnAnswer:    this.shadowRoot.getElementById("btn-answer"),
-      btnHangup:    this.shadowRoot.getElementById("btn-hangup"),
-      audio:        this._remoteAudioEl,
-      note:         this.shadowRoot.getElementById("stream-note"),
+      title:          this.shadowRoot.getElementById("card-title"),
+      subtitle:       this.shadowRoot.getElementById("card-subtitle"),
+      timerBadge:     this.shadowRoot.getElementById("timer-badge"),
+      videoContainer: this.shadowRoot.getElementById("video-container"),
+      cameraMount:    this.shadowRoot.getElementById("camera-mount"),
+      gridIncoming:   this.shadowRoot.getElementById("grid-incoming"),
+      gridInCall:     this.shadowRoot.getElementById("grid-incall"),
+      btnAnswer:      this.shadowRoot.getElementById("btn-answer"),
+      btnReject:      this.shadowRoot.getElementById("btn-reject"),
+      btnHangup:      this.shadowRoot.getElementById("btn-hangup"),
+      btnMute:        this.shadowRoot.getElementById("btn-mute"),
+      btnGate:        this.shadowRoot.getElementById("btn-gate"),
+      audio:          this._remoteAudioEl,
     };
 
     this._el.btnAnswer.addEventListener("click", () => this._answer());
+    this._el.btnReject.addEventListener("click", () => this._hangup());
     this._el.btnHangup.addEventListener("click", () => this._hangup());
+    this._el.btnMute.addEventListener("click", () => this._toggleMute());
+    this._el.btnGate.addEventListener("click", () => this._openGate());
   }
 
   _normalizeAudioUrl(url) {
@@ -172,12 +300,10 @@ class SipCallCard extends HTMLElement {
 
   _formatDuration(totalSeconds) {
     const sec = Math.max(0, Math.floor(totalSeconds));
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
+    const m = Math.floor(sec / 60);
     const s = sec % 60;
     const mm = String(m).padStart(2, "0");
     const ss = String(s).padStart(2, "0");
-    if (h > 0) return `${h}:${mm}:${ss}`;
     return `${mm}:${ss}`;
   }
 
@@ -187,7 +313,9 @@ class SipCallCard extends HTMLElement {
 
     const tick = () => {
       const elapsedSec = (Date.now() - this._callStartedAtMs) / 1000;
-      if (this._el?.duration) this._el.duration.textContent = `Duration: ${this._formatDuration(elapsedSec)}`;
+      if (this._el?.timerBadge) {
+        this._el.timerBadge.textContent = `⏱️ ${this._formatDuration(elapsedSec)}`;
+      }
     };
 
     tick();
@@ -200,61 +328,131 @@ class SipCallCard extends HTMLElement {
       this._durationTimer = null;
     }
     if (reset) this._callStartedAtMs = null;
-    if (this._el?.duration && reset) this._el.duration.textContent = "";
+  }
+
+  _toggleMute() {
+    this._isMuted = !this._isMuted;
+
+    if (this._micStream) {
+      this._micStream.getAudioTracks().forEach(track => {
+        track.enabled = !this._isMuted;
+      });
+    }
+
+    this._updateMuteUI();
+  }
+
+  _updateMuteUI() {
+    if (this._isMuted) {
+      this._el.btnMute.className = "btn btn-muted";
+      this._el.btnMute.textContent = "🔇 Mutado";
+      this._el.subtitle.textContent = "";
+    } else {
+      this._el.btnMute.className = "btn btn-neutral";
+      this._el.btnMute.textContent = "🎙️ Mudo";
+      this._el.subtitle.textContent = "🎙️ Microfone ativo";
+    }
+  }
+
+  async _openGate() {
+    if (!this._hass || !this._config.gate_entity) return;
+
+    const entity = this._config.gate_entity;
+    let domain = entity.split(".")[0];
+    let service = "turn_on";
+
+    if (domain === "button") service = "press";
+    if (domain === "lock") service = "unlock";
+    if (domain === "cover") service = "open_cover";
+
+    if (this._config.gate_service) {
+      const parts = this._config.gate_service.split(".");
+      domain = parts[0];
+      service = parts[1];
+    }
+
+    try {
+      await this._hass.callService(domain, service, { entity_id: entity });
+    } catch (err) {
+      console.error("SIP Card: Error opening gate", err);
+    }
   }
 
   async _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  _updateCamera() {
+    if (!this._config.camera_entity || !this._hass) {
+      this._el.videoContainer.style.display = "none";
+      return;
+    }
+
+    this._el.videoContainer.style.display = "block";
+
+    if (!this._cameraEl) {
+      this._cameraEl = document.createElement("ha-camera-stream");
+      this._el.cameraMount.replaceChildren(this._cameraEl);
+    }
+
+    this._cameraEl.hass = this._hass;
+    this._cameraEl.stateObj = this._hass.states[this._config.camera_entity];
+  }
+
   _updateState() {
     if (!this._hass || !this._config) return;
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) {
-      this._el.badge.textContent = "Entity not found";
+      this._el.title.textContent = "Entidade não encontrada";
       return;
     }
 
-    const sipState  = (stateObj.attributes.sip_state || "").toLowerCase();
-    const haState   = stateObj.state;
-    const rxUrl     = stateObj.attributes.rx_stream_url || null;
-    const txUrl     = stateObj.attributes.tx_audio_url  || null;
-    const title     = this._config.title || stateObj.attributes.friendly_name || "SIP Phone";
+    const sipState = (stateObj.attributes.sip_state || "").toLowerCase();
+    const haState  = stateObj.state;
+    const rxUrl    = stateObj.attributes.rx_stream_url || null;
+    const txUrl    = stateObj.attributes.tx_audio_url  || null;
 
     this._rxUrl = rxUrl;
     this._txUrl = txUrl;
 
-    this._el.title.textContent = title;
-
-    const badge = this._el.badge;
-    badge.className = "state-badge";
-    if (sipState.includes("idle") || haState === "off") {
-      badge.classList.add("idle");
-      badge.textContent = "Idle";
-    } else if (sipState === "incoming") {
-      badge.classList.add("incoming");
-      badge.textContent = "Incoming call";
-    } else if (sipState === "in_call") {
-      badge.classList.add("in_call");
-      badge.textContent = "In call";
-    } else {
-      badge.textContent = haState;
-    }
-
     const isIncoming = sipState === "incoming";
     const isInCall   = sipState === "in_call";
-    const hasCall    = isIncoming || isInCall;
 
-    this._el.btnAnswer.disabled = !isIncoming;
-    this._el.btnHangup.disabled = !hasCall;
+    // 1. Atualizar Títulos e Subtítulos
+    if (isIncoming) {
+      this._el.title.textContent = this._config.title_incoming;
+      this._el.subtitle.textContent = "";
+      this._el.timerBadge.style.display = "none";
+    } else if (isInCall) {
+      this._el.title.textContent = this._config.title_incall;
+      this._el.timerBadge.style.display = "block";
+      this._updateMuteUI();
+    } else {
+      this._el.title.textContent = "🔒 Interfone";
+      this._el.subtitle.textContent = "";
+      this._el.timerBadge.style.display = "none";
+    }
 
+    // 2. Exibição das Grids
+    this._el.gridIncoming.style.display = isIncoming ? "grid" : "none";
+    this._el.gridInCall.style.display   = isInCall ? "grid" : "none";
+
+    // 3. Atualizar Câmera
+    if (isIncoming || isInCall) {
+      this._updateCamera();
+    } else {
+      this._el.videoContainer.style.display = "none";
+    }
+
+    // 4. Lógica de Parada
     if (!isInCall) {
       this._stopMic();
       this._stopListen();
       this._stopDurationTimer(true);
-      this._el.note.textContent = "";
+      this._isMuted = false;
     }
 
+    // 5. Lógica Em Chamada
     if (isInCall) {
       this._startDurationTimer();
       if (rxUrl) {
@@ -267,9 +465,6 @@ class SipCallCard extends HTMLElement {
           });
         }
       }
-      this._el.note.textContent = this._micActive
-        ? "Call active — microphone streaming is enabled."
-        : "Call active.";
     }
   }
 
@@ -287,10 +482,6 @@ class SipCallCard extends HTMLElement {
         if (started || this._micActive) break;
         await this._sleep(250);
       }
-
-      this._el.note.textContent = this._micActive
-        ? "Call answered — microphone streaming enabled."
-        : "Call answered, but microphone is not active yet.";
     } catch (e) {
       console.error("SIP answer error:", e);
     }
@@ -301,6 +492,7 @@ class SipCallCard extends HTMLElement {
     this._stopMic();
     this._stopListen();
     this._stopDurationTimer(true);
+    this._isMuted = false;
     try {
       await this._hass.callService("sip", "hangup", {}, { entity_id: this._config.entity });
     } catch (e) {
@@ -310,25 +502,25 @@ class SipCallCard extends HTMLElement {
 
   async _startMic() {
     if (this._micActive) return true;
-    if (!this._txUrl) {
-      this._el.note.textContent = "No active call for mic input.";
-      return false;
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      this._el.note.textContent = "getUserMedia not supported in this browser.";
-      return false;
-    }
+    if (!this._txUrl) return false;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     } catch (err) {
-      this._el.note.textContent = `Microphone access denied: ${err.message}`;
+      console.error("Microphone access denied:", err);
       return false;
     }
 
     this._micStream = stream;
     this._micActive = true;
     this._micFirstChunk = true;
+
+    // Respeita o estado de Mudo caso já estivesse mutado
+    this._micStream.getAudioTracks().forEach(track => {
+      track.enabled = !this._isMuted;
+    });
 
     const mimeTypes = [
       "audio/webm;codecs=opus",
@@ -399,17 +591,27 @@ class SipCallCard extends HTMLElement {
     el.innerHTML = `
       <style>
         label { display: block; margin-bottom: 4px; font-weight: 500; }
-        input { width: 100%; padding: 6px; box-sizing: border-box; }
+        input { width: 100%; padding: 6px; margin-bottom: 10px; box-sizing: border-box; }
       </style>
-      <label>Entity (media_player):
-        <input id="entity" type="text" placeholder="media_player.sip_client_100_phone_line" />
+      <label>Entidade SIP (media_player):
+        <input id="entity" type="text" placeholder="media_player.sip_interfone" />
+      </label>
+      <label>Entidade do Portão (button, lock, switch):
+        <input id="gate_entity" type="text" placeholder="button.abrir_portao" />
+      </label>
+      <label>Entidade da Câmera (opcional):
+        <input id="camera_entity" type="text" placeholder="camera.portao" />
       </label>
     `;
     return el;
   }
 
   static getStubConfig() {
-    return { entity: "media_player.phone_line" };
+    return { 
+      entity: "media_player.phone_line",
+      gate_entity: "button.abrir_portao",
+      camera_entity: "camera.portao"
+    };
   }
 }
 
@@ -419,12 +621,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "sip-call-card",
   name: "SIP Call Card",
-  description: "Two-way browser audio for hass-sip (test mode).",
+  description: "Card moderno de interfone SIP com suporte a áudio, vídeo e abertura de portão.",
   preview: false,
 });
-
-console.info(
-  "%c SIP-CALL-CARD %c loaded ",
-  "color: white; background: #03a9f4; padding: 2px 4px; border-radius: 4px 0 0 4px;",
-  "color: #03a9f4; background: #f0f0f0; padding: 2px 4px; border-radius: 0 4px 4px 0;"
-);

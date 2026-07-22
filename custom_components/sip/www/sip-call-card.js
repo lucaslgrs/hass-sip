@@ -6,8 +6,8 @@
  *  - Mute/Unmute microphone control
  *  - Call duration timer
  *  - WebRTC-friendly ringtone audio management
- *  - Correct Bearer Token authentication for audio stream (Fixes 401 & MUTE)
- *  - Precision pixel-perfect vertical alignment for HA icons and text
+ *  - Correct Bearer Token authentication for audio stream
+ *  - Compact visual layout with pixel-perfect vertical alignment
  */
 
 class SipCallCard extends HTMLElement {
@@ -56,9 +56,6 @@ class SipCallCard extends HTMLElement {
     this._updateState();
   }
 
-  /**
-   * Obtém o token de autenticação válido do Home Assistant.
-   */
   _getAuthToken() {
     return (
       this._hass?.auth?.accessToken ||
@@ -94,37 +91,37 @@ class SipCallCard extends HTMLElement {
           line-height: 1 !important;
         }
 
+        /* CARD COMPACTO */
         ha-card {
           background-color: #18181a;
           border: 1px solid rgba(255, 255, 255, 0.08);
           border-radius: 16px;
-          padding: 20px 24px;
+          padding: 14px 16px;
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
           color: #ffffff;
           box-sizing: border-box;
         }
 
-        /* CABEÇALHO */
+        /* CABEÇALHO DINÂMICO SEM ALTURA MÍNIMA FIXA */
         .card-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 20px;
-          min-height: 48px;
+          margin-bottom: 12px;
         }
 
         .status-container {
           display: flex;
           flex-direction: column;
           justify-content: center;
-          gap: 6px;
+          gap: 4px;
         }
 
         .status-title {
           display: flex;
           align-items: center;
           gap: 8px;
-          font-size: 1rem;
+          font-size: 0.95rem;
           font-weight: 600;
           color: #ffffff;
           line-height: 1;
@@ -139,9 +136,9 @@ class SipCallCard extends HTMLElement {
 
         .icon-active {
           color: #e53935;
-          --mdc-icon-size: 12px;
-          width: 12px;
-          height: 12px;
+          --mdc-icon-size: 10px;
+          width: 10px;
+          height: 10px;
         }
 
         .icon-idle {
@@ -155,18 +152,18 @@ class SipCallCard extends HTMLElement {
           display: flex;
           align-items: center;
           gap: 6px;
-          font-size: 0.82rem;
+          font-size: 0.8rem;
           color: #9e9e9e;
           line-height: 1;
         }
 
         .mic-subtitle ha-icon {
-          --mdc-icon-size: 15px;
-          width: 15px;
-          height: 15px;
+          --mdc-icon-size: 14px;
+          width: 14px;
+          height: 14px;
         }
 
-        /* CRONÔMETRO */
+        /* CRONÔMETRO COMPACTO */
         .timer-badge {
           display: inline-flex;
           align-items: center;
@@ -174,37 +171,37 @@ class SipCallCard extends HTMLElement {
           background: rgba(46, 125, 50, 0.15);
           border: 1px solid #2e7d32;
           color: #81c784;
-          padding: 6px 12px;
+          padding: 4px 10px;
           border-radius: 20px;
-          font-size: 0.85rem;
+          font-size: 0.82rem;
           font-weight: 600;
           line-height: 1;
         }
 
         .timer-badge ha-icon {
-          --mdc-icon-size: 15px;
-          width: 15px;
-          height: 15px;
+          --mdc-icon-size: 14px;
+          width: 14px;
+          height: 14px;
         }
 
-        /* GRID DE BOTÕES */
+        /* GRID DE BOTÕES COMPACTO */
         .grid-buttons-incoming, .grid-buttons-incall {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 12px;
+          gap: 8px;
         }
 
         .btn-full { grid-column: span 2; }
 
-        /* ESTILO DOS BOTÕES */
+        /* ESTILO DOS BOTÕES COMPACTOS */
         .btn {
           display: inline-flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
-          height: 46px;
-          border-radius: 12px;
-          font-size: 0.92rem;
+          height: 40px;
+          border-radius: 10px;
+          font-size: 0.88rem;
           font-weight: 600;
           cursor: pointer;
           transition: all 0.15s ease;
@@ -214,9 +211,9 @@ class SipCallCard extends HTMLElement {
         }
 
         .btn ha-icon {
-          --mdc-icon-size: 18px;
-          width: 18px;
-          height: 18px;
+          --mdc-icon-size: 16px;
+          width: 16px;
+          height: 16px;
         }
 
         .btn:active { transform: scale(0.98); }

@@ -1,7 +1,7 @@
 /**
  * sip-call-card.js — Custom Lovelace card for hass-sip
  * Feature Set:
- *  - Dynamic UI (Incoming / In-Call / Idle)
+ *  - Dynamic UI matching HA dark theme (Incoming / In-Call / Idle)
  *  - Gate Script Integration with Visual Alert Feedback
  *  - Mute/Unmute microphone control
  *  - Call duration timer
@@ -42,8 +42,8 @@ class SipCallCard extends HTMLElement {
       throw new Error("sip-call-card: 'entity' is required");
     }
     this._config = {
-      title_incoming: "🔔 Chamando...",
-      title_incall: "🔴 Em andamento...",
+      title_incoming: "Chamando...",
+      title_incall: "Em andamento...",
       ringtone_url: "/local/sounds/ringtone.mp3",
       ...config
     };
@@ -72,127 +72,216 @@ class SipCallCard extends HTMLElement {
       <style>
         :host {
           display: block;
-          --card-bg: #1c1c1e;
-          --card-border: rgba(255, 255, 255, 0.08);
-          --text-primary: #f3f4f6;
-          --text-secondary: #9ca3af;
-          
-          --btn-success-bg: rgba(46, 125, 50, 0.22);
-          --btn-success-border: rgba(76, 175, 80, 0.35);
-          --btn-success-text: #81c784;
-
-          --btn-danger-bg: rgba(211, 47, 47, 0.2);
-          --btn-danger-border: rgba(239, 83, 80, 0.3);
-          --btn-danger-text: #e57373;
-
-          --btn-action-bg: rgba(2, 136, 209, 0.2);
-          --btn-action-border: rgba(41, 182, 246, 0.3);
-          --btn-action-text: #64b5f6;
-
-          --btn-neutral-bg: rgba(255, 255, 255, 0.05);
-          --btn-neutral-border: rgba(255, 255, 255, 0.1);
-          --btn-neutral-text: #e5e7eb;
-
-          --btn-muted-bg: rgba(245, 124, 0, 0.2);
-          --btn-muted-border: rgba(255, 167, 38, 0.35);
-          --btn-muted-text: #ffb74d;
-
           font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
         ha-card {
-          background: var(--card-bg);
-          border: 1px solid var(--card-border);
-          border-radius: 18px;
-          padding: 18px;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-          color: var(--text-primary);
+          background-color: #18181a;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 16px;
+          padding: 20px 24px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+          color: #ffffff;
+          box-sizing: border-box;
         }
 
+        /* CABEÇALHO */
         .card-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 14px;
-          min-height: 32px;
+          align-items: flex-start;
+          margin-bottom: 20px;
+          min-height: 48px;
         }
 
-        .card-title {
-          font-weight: 600;
-          font-size: 1.05rem;
+        .status-container {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+
+        .status-title {
           display: flex;
           align-items: center;
-          gap: 8px;
-          color: var(--text-primary);
-        }
-
-        .subtitle {
-          font-size: 0.78rem;
-          color: var(--text-secondary);
-          margin-top: 2px;
-        }
-
-        .timer-badge {
-          font-size: 0.78rem;
+          gap: 10px;
+          font-size: 1rem;
           font-weight: 600;
-          padding: 4px 10px;
-          border-radius: 20px;
-          background: var(--btn-success-bg);
-          color: var(--btn-success-text);
-          border: 1px solid var(--btn-success-border);
+          color: #ffffff;
         }
 
+        .icon-bell {
+          color: #ffca28;
+          --mdc-icon-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+
+        .icon-active {
+          color: #e53935;
+          --mdc-icon-size: 16px;
+          width: 16px;
+          height: 16px;
+        }
+
+        .icon-idle {
+          color: #9e9e9e;
+          --mdc-icon-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+
+        .mic-subtitle {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.82rem;
+          color: #9e9e9e;
+          margin-left: 2px;
+        }
+
+        .mic-subtitle ha-icon {
+          --mdc-icon-size: 15px;
+          width: 15px;
+          height: 15px;
+        }
+
+        /* CRONÔMETRO */
+        .timer-badge {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(46, 125, 50, 0.15);
+          border: 1px solid #2e7d32;
+          color: #81c784;
+          padding: 4px 12px;
+          border-radius: 20px;
+          font-size: 0.85rem;
+          font-weight: 600;
+        }
+
+        .timer-badge ha-icon {
+          --mdc-icon-size: 14px;
+          width: 14px;
+          height: 14px;
+        }
+
+        /* GRID DE BOTÕES */
         .grid-buttons-incoming, .grid-buttons-incall {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 10px;
+          gap: 12px;
         }
 
         .btn-full { grid-column: span 2; }
 
+        /* ESTILO DOS BOTÕES */
         .btn {
           display: inline-flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
-          padding: 12px 14px;
+          height: 46px;
           border-radius: 12px;
-          font-size: 0.88rem;
+          font-size: 0.92rem;
           font-weight: 600;
           cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-          border: none;
+          transition: all 0.15s ease;
           outline: none;
+          box-sizing: border-box;
         }
 
-        .btn:hover { filter: brightness(1.2); }
+        .btn ha-icon {
+          --mdc-icon-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+
         .btn:active { transform: scale(0.98); }
 
-        .btn-success { background: var(--btn-success-bg); border: 1px solid var(--btn-success-border); color: var(--btn-success-text); }
-        .btn-danger  { background: var(--btn-danger-bg); border: 1px solid var(--btn-danger-border); color: var(--btn-danger-text); }
-        .btn-action  { background: var(--btn-action-bg); border: 1px solid var(--btn-action-border); color: var(--btn-action-text); }
-        .btn-neutral { background: var(--btn-neutral-bg); border: 1px solid var(--btn-neutral-border); color: var(--btn-neutral-text); }
-        .btn-muted   { background: var(--btn-muted-bg); border: 1px solid var(--btn-muted-border); color: var(--btn-muted-text); }
+        /* CORES ESPECÍFICAS */
+        .btn-answer {
+          background: rgba(27, 77, 41, 0.25);
+          border: 1px solid #2e7d32;
+          color: #81c784;
+        }
+
+        .btn-reject, .btn-hangup {
+          background: rgba(120, 28, 32, 0.25);
+          border: 1px solid #d32f2f;
+          color: #ef5350;
+        }
+
+        .btn-gate {
+          background: rgba(13, 71, 120, 0.25);
+          border: 1px solid #0288d1;
+          color: #64b5f6;
+        }
+
+        .btn-mute {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          color: #ffffff;
+        }
+
+        .btn-mute.active {
+          background: rgba(245, 124, 0, 0.2);
+          border: 1px solid #f57c00;
+          color: #ffb74d;
+        }
+
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
       </style>
 
       <ha-card>
         <div class="card-header">
-          <div>
-            <div class="card-title" id="card-title">🔔 Chamando...</div>
-            <div class="subtitle" id="card-subtitle"></div>
+          <div class="status-container">
+            <div class="status-title" id="card-title">
+              <ha-icon class="icon-idle" icon="mdi:doorbell"></ha-icon>
+              <span>Interfone</span>
+            </div>
+            <div class="mic-subtitle" id="card-subtitle" style="display: none;">
+              <ha-icon id="mic-subtitle-icon" icon="mdi:microphone"></ha-icon>
+              <span id="mic-subtitle-text">Microfone ativo</span>
+            </div>
           </div>
-          <div class="timer-badge" id="timer-badge" style="display: none;">⏱️ 00:00</div>
+
+          <div class="timer-badge" id="timer-badge" style="display: none;">
+            <ha-icon icon="mdi:timer-outline"></ha-icon>
+            <span id="timer-text">00:00</span>
+          </div>
         </div>
 
         <div class="grid-buttons-incoming" id="grid-incoming" style="display: none;">
-          <button class="btn btn-success" id="btn-answer">📞 Atender</button>
-          <button class="btn btn-danger" id="btn-reject">📵 Recusar</button>
+          <button class="btn btn-answer" id="btn-answer">
+            <ha-icon icon="mdi:phone"></ha-icon>
+            <span>Atender</span>
+          </button>
+          <button class="btn btn-reject" id="btn-reject">
+            <ha-icon icon="mdi:phone-off"></ha-icon>
+            <span>Recusar</span>
+          </button>
         </div>
 
         <div class="grid-buttons-incall" id="grid-incall" style="display: none;">
-          <button class="btn btn-action" id="btn-gate">🔑 Abrir Portão</button>
-          <button class="btn btn-neutral" id="btn-mute">🎙️ Mudo</button>
-          <button class="btn btn-danger btn-full" id="btn-hangup">📵 Desligar</button>
+          <button class="btn btn-gate" id="btn-gate">
+            <ha-icon id="gate-icon" icon="mdi:key-variant"></ha-icon>
+            <span id="gate-text">Abrir Portão</span>
+          </button>
+          <button class="btn btn-mute" id="btn-mute">
+            <ha-icon id="mute-icon" icon="mdi:microphone"></ha-icon>
+            <span id="mute-text">Mudo</span>
+          </button>
+          <button class="btn btn-hangup btn-full" id="btn-hangup">
+            <ha-icon icon="mdi:phone-off"></ha-icon>
+            <span>Desligar</span>
+          </button>
         </div>
 
         <div id="rx-audio-slot"></div>
@@ -207,14 +296,21 @@ class SipCallCard extends HTMLElement {
     this._el = {
       title:        this.shadowRoot.getElementById("card-title"),
       subtitle:     this.shadowRoot.getElementById("card-subtitle"),
+      subtitleIcon: this.shadowRoot.getElementById("mic-subtitle-icon"),
+      subtitleText: this.shadowRoot.getElementById("mic-subtitle-text"),
       timerBadge:   this.shadowRoot.getElementById("timer-badge"),
+      timerText:    this.shadowRoot.getElementById("timer-text"),
       gridIncoming: this.shadowRoot.getElementById("grid-incoming"),
       gridInCall:   this.shadowRoot.getElementById("grid-incall"),
       btnAnswer:    this.shadowRoot.getElementById("btn-answer"),
       btnReject:    this.shadowRoot.getElementById("btn-reject"),
       btnHangup:    this.shadowRoot.getElementById("btn-hangup"),
       btnMute:      this.shadowRoot.getElementById("btn-mute"),
+      muteIcon:     this.shadowRoot.getElementById("mute-icon"),
+      muteText:     this.shadowRoot.getElementById("mute-text"),
       btnGate:      this.shadowRoot.getElementById("btn-gate"),
+      gateIcon:     this.shadowRoot.getElementById("gate-icon"),
+      gateText:     this.shadowRoot.getElementById("gate-text"),
       audio:        this._remoteAudioEl,
     };
 
@@ -294,8 +390,8 @@ class SipCallCard extends HTMLElement {
 
     const tick = () => {
       const elapsedSec = (Date.now() - this._callStartedAtMs) / 1000;
-      if (this._el?.timerBadge) {
-        this._el.timerBadge.textContent = `⏱️ ${this._formatDuration(elapsedSec)}`;
+      if (this._el?.timerText) {
+        this._el.timerText.textContent = this._formatDuration(elapsedSec);
       }
     };
 
@@ -322,14 +418,19 @@ class SipCallCard extends HTMLElement {
   }
 
   _updateMuteUI() {
+    if (!this._el) return;
     if (this._isMuted) {
-      this._el.btnMute.className = "btn btn-muted";
-      this._el.btnMute.textContent = "🔇 Mutado";
-      this._el.subtitle.textContent = "";
+      this._el.btnMute.className = "btn btn-mute active";
+      if (this._el.muteIcon) this._el.muteIcon.setAttribute("icon", "mdi:microphone-off");
+      if (this._el.muteText) this._el.muteText.textContent = "Mutado";
+      if (this._el.subtitleIcon) this._el.subtitleIcon.setAttribute("icon", "mdi:microphone-off");
+      if (this._el.subtitleText) this._el.subtitleText.textContent = "Microfone mutado";
     } else {
-      this._el.btnMute.className = "btn btn-neutral";
-      this._el.btnMute.textContent = "🎙️ Mudo";
-      this._el.subtitle.textContent = "🎙️ Microfone ativo";
+      this._el.btnMute.className = "btn btn-mute";
+      if (this._el.muteIcon) this._el.muteIcon.setAttribute("icon", "mdi:microphone");
+      if (this._el.muteText) this._el.muteText.textContent = "Mudo";
+      if (this._el.subtitleIcon) this._el.subtitleIcon.setAttribute("icon", "mdi:microphone");
+      if (this._el.subtitleText) this._el.subtitleText.textContent = "Microfone ativo";
     }
   }
 
@@ -339,7 +440,6 @@ class SipCallCard extends HTMLElement {
     const btn = this._el.btnGate;
     if (!btn) return;
 
-    const originalText = "🔑 Abrir Portão";
     const originalClass = btn.className;
 
     const entity = this._config.gate_entity;
@@ -357,28 +457,40 @@ class SipCallCard extends HTMLElement {
     }
 
     try {
-      btn.textContent = "🔓 Abrindo...";
+      if (this._el.gateIcon) {
+        this._el.gateIcon.setAttribute("icon", "mdi:loading");
+        this._el.gateIcon.classList.add("spin");
+      }
+      if (this._el.gateText) this._el.gateText.textContent = "Abrindo...";
       btn.style.pointerEvents = "none";
-      btn.style.opacity = "0.8";
 
       await this._hass.callService(domain, service, { entity_id: entity });
 
-      btn.textContent = "✅ Portão Aberto!";
-      btn.className = "btn btn-success";
-      btn.style.opacity = "1";
+      if (this._el.gateIcon) {
+        this._el.gateIcon.classList.remove("spin");
+        this._el.gateIcon.setAttribute("icon", "mdi:check-circle-outline");
+      }
+      if (this._el.gateText) this._el.gateText.textContent = "Portão Aberto!";
+      btn.className = "btn btn-answer";
 
     } catch (err) {
       console.error("SIP Card: Error opening gate", err);
-      btn.textContent = "❌ Erro ao Abrir";
-      btn.className = "btn btn-danger";
-      btn.style.opacity = "1";
+      if (this._el.gateIcon) {
+        this._el.gateIcon.classList.remove("spin");
+        this._el.gateIcon.setAttribute("icon", "mdi:close-circle-outline");
+      }
+      if (this._el.gateText) this._el.gateText.textContent = "Erro ao Abrir";
+      btn.className = "btn btn-reject";
     } finally {
       setTimeout(() => {
         if (btn) {
-          btn.textContent = originalText;
+          if (this._el.gateIcon) {
+            this._el.gateIcon.classList.remove("spin");
+            this._el.gateIcon.setAttribute("icon", "mdi:key-variant");
+          }
+          if (this._el.gateText) this._el.gateText.textContent = "Abrir Portão";
           btn.className = originalClass;
           btn.style.pointerEvents = "auto";
-          btn.style.opacity = "1";
         }
       }, 2500);
     }
@@ -392,7 +504,7 @@ class SipCallCard extends HTMLElement {
     if (!this._hass || !this._config) return;
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) {
-      this._el.title.textContent = "Entidade não encontrada";
+      this._el.title.innerHTML = `<span>Entidade não encontrada</span>`;
       return;
     }
 
@@ -416,16 +528,19 @@ class SipCallCard extends HTMLElement {
     }
 
     if (isIncoming) {
-      this._el.title.textContent = this._config.title_incoming;
-      this._el.subtitle.textContent = "";
+      const titleText = this._config.title_incoming.replace(/^[\u200B-\u200D\uFEFF]|[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim();
+      this._el.title.innerHTML = `<ha-icon class="icon-bell" icon="mdi:bell-ring"></ha-icon><span>${titleText || "Chamando..."}</span>`;
+      this._el.subtitle.style.display = "none";
       this._el.timerBadge.style.display = "none";
     } else if (isInCall) {
-      this._el.title.textContent = this._config.title_incall;
-      this._el.timerBadge.style.display = "block";
+      const titleText = this._config.title_incall.replace(/^[\u200B-\u200D\uFEFF]|[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim();
+      this._el.title.innerHTML = `<ha-icon class="icon-active" icon="mdi:circle"></ha-icon><span>${titleText || "Em andamento..."}</span>`;
+      this._el.subtitle.style.display = "flex";
+      this._el.timerBadge.style.display = "flex";
       this._updateMuteUI();
     } else {
-      this._el.title.textContent = "🔒 Interfone";
-      this._el.subtitle.textContent = "";
+      this._el.title.innerHTML = `<ha-icon class="icon-idle" icon="mdi:doorbell"></ha-icon><span>Interfone</span>`;
+      this._el.subtitle.style.display = "none";
       this._el.timerBadge.style.display = "none";
     }
 

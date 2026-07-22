@@ -7,7 +7,7 @@
  *  - Call duration timer
  *  - WebRTC-friendly ringtone audio management
  *  - Correct Bearer Token authentication for audio stream (Fixes 401 & MUTE)
- *  - Fixed vertical icon alignment for HA Custom Icons
+ *  - Precision pixel-perfect vertical alignment for HA icons and text
  */
 
 class SipCallCard extends HTMLElement {
@@ -76,13 +76,22 @@ class SipCallCard extends HTMLElement {
           font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
-        /* NORMALIZAÇÃO GLOBAL DOS ÍCONES PARA ALINHAMENTO PERFEITO */
+        /* RESET E ALINHAMENTO MATEMÁTICO DOS ÍCONES E TEXTOS */
         ha-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
           flex-shrink: 0;
-          vertical-align: middle;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+
+        .status-title span,
+        .mic-subtitle span,
+        .timer-badge span,
+        .btn span {
+          display: inline-block;
+          line-height: 1 !important;
         }
 
         ha-card {
@@ -114,11 +123,11 @@ class SipCallCard extends HTMLElement {
         .status-title {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           font-size: 1rem;
           font-weight: 600;
           color: #ffffff;
-          line-height: 1.2;
+          line-height: 1;
         }
 
         .icon-bell {
@@ -130,9 +139,9 @@ class SipCallCard extends HTMLElement {
 
         .icon-active {
           color: #e53935;
-          --mdc-icon-size: 14px;
-          width: 14px;
-          height: 14px;
+          --mdc-icon-size: 12px;
+          width: 12px;
+          height: 12px;
         }
 
         .icon-idle {
@@ -148,7 +157,7 @@ class SipCallCard extends HTMLElement {
           gap: 6px;
           font-size: 0.82rem;
           color: #9e9e9e;
-          line-height: 1.2;
+          line-height: 1;
         }
 
         .mic-subtitle ha-icon {
@@ -159,17 +168,17 @@ class SipCallCard extends HTMLElement {
 
         /* CRONÔMETRO */
         .timer-badge {
-          display: flex;
+          display: inline-flex;
           align-items: center;
           gap: 6px;
           background: rgba(46, 125, 50, 0.15);
           border: 1px solid #2e7d32;
           color: #81c784;
-          padding: 6px 14px;
+          padding: 6px 12px;
           border-radius: 20px;
           font-size: 0.85rem;
           font-weight: 600;
-          line-height: 1.2;
+          line-height: 1;
         }
 
         .timer-badge ha-icon {
@@ -201,6 +210,7 @@ class SipCallCard extends HTMLElement {
           transition: all 0.15s ease;
           outline: none;
           box-sizing: border-box;
+          line-height: 1;
         }
 
         .btn ha-icon {
@@ -549,7 +559,7 @@ class SipCallCard extends HTMLElement {
       const titleText = this._config.title_incall.replace(/^[\u200B-\u200D\uFEFF]|[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '').trim();
       this._el.title.innerHTML = `<ha-icon class="icon-active" icon="mdi:circle"></ha-icon><span>${titleText || "Em andamento..."}</span>`;
       this._el.subtitle.style.display = "flex";
-      this._el.timerBadge.style.display = "flex";
+      this._el.timerBadge.style.display = "inline-flex";
       this._updateMuteUI();
     } else {
       this._el.title.innerHTML = `<ha-icon class="icon-idle" icon="mdi:doorbell"></ha-icon><span>Interfone</span>`;

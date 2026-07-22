@@ -8,6 +8,7 @@
  *  - WebRTC-friendly ringtone audio management
  *  - Correct Bearer Token authentication for audio stream
  *  - Compact visual layout with pixel-perfect vertical alignment
+ *  - Web Audio API GainNode (Digital Audio Boost / Amplificador de Volume)
  */
 
 class SipCallCard extends HTMLElement {
@@ -28,6 +29,11 @@ class SipCallCard extends HTMLElement {
     this._callStartedAtMs = null;
     this._durationTimer = null;
 
+    // Web Audio API Context & Gain
+    this._audioCtx = null;
+    this._gainNode = null;
+    this._audioSource = null;
+
     this._remoteAudioEl = document.createElement("audio");
     this._remoteAudioEl.controls = false;
     this._remoteAudioEl.playsInline = true;
@@ -46,6 +52,7 @@ class SipCallCard extends HTMLElement {
       title_incoming: "Chamando...",
       title_incall: "Em andamento...",
       ringtone_url: "/local/sounds/ringtone.mp3",
+      audio_gain: 2.0, // Multiplicador de volume padrão (2.0 = 200%)
       ...config
     };
     this._render();
@@ -63,6 +70,38 @@ class SipCallCard extends HTMLElement {
       this._hass?.auth?.data?.access_token ||
       ""
     );
+  }
+
+  /**
+   * Configura o amplificador de áudio via Web Audio API (GainNode)
+   */
+  _setupAudioAmplifier() {
+    const gainFactor = parseFloat(this._config.audio_gain || 2.0);
+
+    if (!this._audioCtx) {
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        this._audioCtx = new AudioContextClass();
+        this._gainNode = this._audioCtx.createGain();
+        this._audioSource = this._audioCtx.createMediaElementSource(this._remoteAudioEl);
+
+        // Conecta: <audio> -> GainNode -> Alto-falantes
+        this._audioSource.connect(this._gainNode);
+        this._gainNode.connect(this._audioCtx.destination);
+      } catch (e) {
+        console.error("SIP Card: Erro ao configurar Web Audio API GainNode:", e);
+      }
+    }
+
+    if (this._gainNode) {
+      this._gainNode.gain.value = gainFactor;
+    }
+
+    if (this._audioCtx && this._audioCtx.state === "suspended") {
+      this._audioCtx.resume().catch(() => {});
+    }
   }
 
   _render() {
@@ -102,7 +141,7 @@ class SipCallCard extends HTMLElement {
           box-sizing: border-box;
         }
 
-        /* CABEÇALHO DINÂMICO SEM ALTURA MÍNIMA FIXA */
+        /* CABEÇALHO DINÂMICO */
         .card-header {
           display: flex;
           justify-content: space-between;
@@ -578,6 +617,7 @@ class SipCallCard extends HTMLElement {
       this._startDurationTimer();
       if (rxUrl) {
         this._bindRemoteAudio();
+        this._setupAudioAmplifier(); // Inicializa / ativa o ganho de volume
         this._el.audio.style.display = "none";
         if (this._el.audio.paused && !this._listenStarting) {
           this._listenStarting = true;
@@ -592,6 +632,7 @@ class SipCallCard extends HTMLElement {
   async _answer() {
     if (!this._hass) return;
     this._stopRingtone();
+    this._setupAudioAmplifier(); // Ativa Web Audio API na interação do clique
     try {
       await this._hass.callService("sip", "answer", {}, { entity_id: this._config.entity });
       await this._sleep(150);
@@ -735,6 +776,9 @@ class SipCallCard extends HTMLElement {
       <label>Caminho do Som da Chamada (Ringtone MP3):
         <input id="ringtone_url" type="text" placeholder="/local/sounds/ringtone.mp3" />
       </label>
+      <label>Ganho do Áudio de Entrada (Ex: 2.0 = 200%, 3.0 = 300%):
+        <input id="audio_gain" type="number" step="0.5" placeholder="2.0" />
+      </label>
     `;
     return el;
   }
@@ -743,7 +787,8 @@ class SipCallCard extends HTMLElement {
     return { 
       entity: "media_player.sip_interfone",
       gate_entity: "script.abrir_portao_do_interfone",
-      ringtone_url: "/local/sounds/ringtone.mp3"
+      ringtone_url: "/local/sounds/ringtone.mp3",
+      audio_gain: 2.0
     };
   }
 }
@@ -754,6 +799,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "sip-call-card",
   name: "SIP Call Card",
-  description: "Card moderno de interfone SIP com áudio, campainha, mudo e portão.",
+  description: "Card moderno de interfone SIP com áudio, amplificador, campainha, mudo e portão.",
   preview: false,
 });

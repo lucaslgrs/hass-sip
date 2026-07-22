@@ -6,7 +6,7 @@
  *  - Mute/Unmute microphone control
  *  - Call duration timer
  *  - WebRTC-friendly ringtone audio management
- *  - Native HA fetchWithAuth integration to avoid HTTP ban logs
+ *  - Correct Bearer Token authentication for audio stream (Fixes 401 & MUTE)
  */
 
 class SipCallCard extends HTMLElement {
@@ -55,6 +55,18 @@ class SipCallCard extends HTMLElement {
     this._updateState();
   }
 
+  /**
+   * Obtém o token de autenticação válido do Home Assistant.
+   */
+  _getAuthToken() {
+    return (
+      this._hass?.auth?.accessToken ||
+      this._hass?.connection?.auth?.accessToken ||
+      this._hass?.auth?.data?.access_token ||
+      ""
+    );
+  }
+
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
@@ -65,7 +77,6 @@ class SipCallCard extends HTMLElement {
           --text-primary: #f3f4f6;
           --text-secondary: #9ca3af;
           
-          /* Cores Modernas Suaves (Tinted Glass) */
           --btn-success-bg: rgba(46, 125, 50, 0.22);
           --btn-success-border: rgba(76, 175, 80, 0.35);
           --btn-success-text: #81c784;
@@ -519,23 +530,20 @@ class SipCallCard extends HTMLElement {
       this._micFirstChunk = false;
       const url = isFirst ? txUrl + "?action=start" : txUrl;
 
-      const fetchOptions = {
-        method: "POST",
-        headers: { "Content-Type": mimeType || "audio/webm" },
-        credentials: "same-origin",
-        body: event.data,
-      };
+      const token = this._getAuthToken();
+      const headers = { "Content-Type": mimeType || "audio/webm" };
+      
+      if (token) {
+        headers["Authorization"] = "Bearer " + token;
+      }
 
       try {
-        if (this._hass?.fetchWithAuth) {
-          await this._hass.fetchWithAuth(url, fetchOptions);
-        } else {
-          const token = this._hass?.auth?.accessToken || this._hass?.auth?.data?.access_token;
-          if (token) {
-            fetchOptions.headers["Authorization"] = "Bearer " + token;
-            await fetch(url, fetchOptions);
-          }
-        }
+        await fetch(url, {
+          method: "POST",
+          headers: headers,
+          credentials: "same-origin",
+          body: event.data,
+        });
       } catch (err) {
         console.debug("SIP TX audio send error:", err);
       }
@@ -559,17 +567,18 @@ class SipCallCard extends HTMLElement {
 
     if (this._txUrl && this._hass) {
       const stopUrl = this._txUrl + "?action=stop";
-      const fetchOptions = { method: "POST", credentials: "same-origin" };
-
-      if (this._hass.fetchWithAuth) {
-        this._hass.fetchWithAuth(stopUrl, fetchOptions).catch(() => {});
-      } else {
-        const token = this._hass?.auth?.accessToken || this._hass?.auth?.data?.access_token;
-        if (token) {
-          fetchOptions.headers = { "Authorization": "Bearer " + token };
-          fetch(stopUrl, fetchOptions).catch(() => {});
-        }
+      const token = this._getAuthToken();
+      const headers = {};
+      
+      if (token) {
+        headers["Authorization"] = "Bearer " + token;
       }
+
+      fetch(stopUrl, {
+        method: "POST",
+        headers: headers,
+        credentials: "same-origin"
+      }).catch(() => {});
     }
   }
 
